@@ -1,0 +1,6 @@
+{
+  "name": "Possensior Official Store",
+  "description": "Website resmi streetwear Possensior dengan koleksi apparel boxy, pembayaran QRIS & Transfer Bank, dan sistem pelacakan resi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
