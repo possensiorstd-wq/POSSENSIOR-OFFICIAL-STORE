@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { CartItem, ShippingInfo, PaymentType, BankAccount, Order } from '../types/store';
-import { BANK_ACCOUNTS } from '../data/products';
+import { BANK_ACCOUNTS, QRIS_MANUAL_CONFIG } from '../data/products';
 import { 
   ArrowLeft, 
   Check, 
@@ -13,7 +13,8 @@ import {
   AlertCircle,
   Clock,
   Sparkles,
-  Download
+  Download,
+  MessageCircle
 } from 'lucide-react';
 import { PossensiorIcon } from './Logos';
 
@@ -47,8 +48,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
   const [downloadedQRIS, setDownloadedQRIS] = useState(false);
   const [uploadedProof, setUploadedProof] = useState<string | null>(null);
   const [proofPreviewUrl, setProofPreviewUrl] = useState<string | null>(null);
-  const [countdownMinutes, setCountdownMinutes] = useState(14);
-  const [countdownSeconds, setCountdownSeconds] = useState(59);
+  const [copiedAmount, setCopiedAmount] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -64,24 +64,18 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
   const shippingCost = courierRates[courier];
   const grandTotal = Math.max(0, subtotal - discountAmount + shippingCost);
 
-  // Timer countdown for QRIS
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCountdownSeconds((prevSec) => {
-        if (prevSec > 0) return prevSec - 1;
-        setCountdownMinutes((prevMin) => (prevMin > 0 ? prevMin - 1 : 0));
-        return 59;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
-
   const formatRupiah = (num: number) => {
     return new Intl.NumberFormat('id-ID', {
       style: 'currency',
       currency: 'IDR',
       minimumFractionDigits: 0,
     }).format(num);
+  };
+
+  const handleCopyAmount = () => {
+    navigator.clipboard.writeText(String(grandTotal));
+    setCopiedAmount(true);
+    setTimeout(() => setCopiedAmount(false), 2500);
   };
 
   const handleCopyAccount = () => {
@@ -122,7 +116,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
     ctx.textAlign = 'center';
     ctx.fillText('POSSENSIOR OFFICIAL STORE', 300, 42);
     ctx.font = '13px system-ui, -apple-system, sans-serif';
-    ctx.fillText('QRIS PEMBAYARAN STANDAR NASIONAL', 300, 70);
+    ctx.fillText('QRIS PEMBAYARAN MANUAL', 300, 70);
 
     // QRIS & GPN Subheaders
     ctx.fillStyle = '#18181B';
@@ -137,76 +131,203 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
     ctx.lineWidth = 2;
     ctx.strokeRect(50, 160, 500, 500);
 
-    // Position markers (Top-left, Top-right, Bottom-left)
-    ctx.fillStyle = '#18181B';
-    ctx.fillRect(90, 200, 100, 100);
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(110, 220, 60, 60);
-    ctx.fillStyle = '#18181B';
-    ctx.fillRect(125, 235, 30, 30);
+    const finishDownload = () => {
+      ctx.fillStyle = '#64748B';
+      ctx.font = '13px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(`NMID: ${QRIS_MANUAL_CONFIG.nmid} · ${QRIS_MANUAL_CONFIG.storeName}`, 300, 695);
 
-    ctx.fillRect(410, 200, 100, 100);
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(430, 220, 60, 60);
-    ctx.fillStyle = '#18181B';
-    ctx.fillRect(445, 235, 30, 30);
+      ctx.fillStyle = '#365E52';
+      ctx.font = 'bold 22px monospace';
+      ctx.fillText(`TOTAL: ${formatRupiah(grandTotal)}`, 300, 735);
 
-    ctx.fillRect(90, 520, 100, 100);
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(110, 540, 60, 60);
-    ctx.fillStyle = '#18181B';
-    ctx.fillRect(125, 555, 30, 30);
+      const link = document.createElement('a');
+      link.download = `QRIS-Possensior-Manual-${Date.now()}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+      setDownloadedQRIS(true);
+      setTimeout(() => setDownloadedQRIS(false), 3000);
+    };
 
-    // Stylized QR pattern blocks
-    const matrixDots = [
-      [220, 210, 30, 30], [270, 205, 40, 25], [330, 210, 25, 40],
-      [215, 270, 45, 25], [280, 260, 30, 30], [335, 270, 40, 25],
-      [110, 335, 30, 30], [165, 325, 40, 25], [225, 325, 30, 30], [385, 325, 30, 40], [440, 335, 30, 30],
-      [120, 395, 35, 25], [175, 400, 25, 25], [385, 395, 45, 30], [445, 400, 35, 25],
-      [225, 455, 30, 25], [275, 445, 40, 30], [335, 455, 30, 25], [385, 465, 25, 25],
-      [225, 525, 35, 30], [275, 535, 25, 25], [325, 515, 30, 35], [375, 535, 40, 25], [435, 525, 30, 30],
-      [225, 585, 25, 25], [265, 595, 40, 20], [325, 585, 30, 30], [385, 595, 35, 25], [445, 585, 40, 30]
-    ];
-    matrixDots.forEach(([x, y, w, h]) => {
-      ctx.fillRect(x, y, w, h);
-    });
+    const drawFallbackPattern = () => {
+      ctx.fillStyle = '#18181B';
+      ctx.fillRect(90, 200, 100, 100);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(110, 220, 60, 60);
+      ctx.fillStyle = '#18181B';
+      ctx.fillRect(125, 235, 30, 30);
 
-    // Center emblem badge
-    ctx.fillStyle = '#365E52';
-    ctx.beginPath();
-    if (typeof (ctx as any).roundRect === 'function') {
-      (ctx as any).roundRect(260, 370, 80, 80, 16);
-      ctx.fill();
-    } else {
+      ctx.fillRect(410, 200, 100, 100);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(430, 220, 60, 60);
+      ctx.fillStyle = '#18181B';
+      ctx.fillRect(445, 235, 30, 30);
+
+      ctx.fillRect(90, 520, 100, 100);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(110, 540, 60, 60);
+      ctx.fillStyle = '#18181B';
+      ctx.fillRect(125, 555, 30, 30);
+
+      const matrixDots = [
+        [220, 210, 30, 30], [270, 205, 40, 25], [330, 210, 25, 40],
+        [215, 270, 45, 25], [280, 260, 30, 30], [335, 270, 40, 25],
+        [110, 335, 30, 30], [165, 325, 40, 25], [225, 325, 30, 30], [385, 325, 30, 40], [440, 335, 30, 30],
+        [120, 395, 35, 25], [175, 400, 25, 25], [385, 395, 45, 30], [445, 400, 35, 25],
+        [225, 455, 30, 25], [275, 445, 40, 30], [335, 455, 30, 25], [385, 465, 25, 25],
+        [225, 525, 35, 30], [275, 535, 25, 25], [325, 515, 30, 35], [375, 535, 40, 25], [435, 525, 30, 30],
+        [225, 585, 25, 25], [265, 595, 40, 20], [325, 585, 30, 30], [385, 595, 35, 25], [445, 585, 40, 30]
+      ];
+      matrixDots.forEach(([x, y, w, h]) => {
+        ctx.fillRect(x, y, w, h);
+      });
+
+      ctx.fillStyle = '#365E52';
       ctx.fillRect(260, 370, 80, 80);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'italic bold 52px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('P', 300, 430);
+    };
+
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = QRIS_MANUAL_CONFIG.image;
+    img.onload = () => {
+      ctx.drawImage(img, 70, 180, 460, 460);
+      finishDownload();
+    };
+    img.onerror = () => {
+      drawFallbackPattern();
+      finishDownload();
+    };
+  };
+
+  const handleSendProofViaWhatsApp = () => {
+    if (!fullName.trim() || !phone.trim() || !address.trim() || !city.trim()) {
+      setFormError('Harap lengkapi nama penerima, nomor WhatsApp, dan alamat pengiriman terlebih dahulu sebelum mengirim bukti pembayaran.');
+      window.scrollTo({ top: 120, behavior: 'smooth' });
+      return;
     }
 
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'italic bold 52px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('P', 300, 430);
+    setIsSubmitting(true);
+    setFormError(null);
 
-    // NMID and Total tag
-    ctx.fillStyle = '#64748B';
-    ctx.font = '13px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('NMID: ID102003928103 · POSSENSIOR OFFICIAL', 300, 695);
+    const randomSuffix = Math.floor(100000 + Math.random() * 900000);
+    const invoiceNumber = `POSS-${randomSuffix}`;
 
-    ctx.fillStyle = '#365E52';
-    ctx.font = 'bold 22px monospace';
-    ctx.fillText(`TOTAL: ${formatRupiah(grandTotal)}`, 300, 735);
+    const newOrder: Order = {
+      id: `order-${Date.now()}`,
+      invoiceNumber,
+      createdAt: new Intl.DateTimeFormat('id-ID', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      }).format(new Date()),
+      items: [...items],
+      subtotal,
+      shippingCost,
+      discount: discountAmount,
+      total: grandTotal,
+      shipping: {
+        fullName: fullName.trim(),
+        phone: phone.trim(),
+        address: address.trim(),
+        city: city.trim(),
+        province,
+        postalCode,
+        courier,
+        shippingCost,
+        notes: notes.trim(),
+      },
+      paymentMethod: 'qris',
+      paymentStatus: 'menunggu_pembayaran',
+      trackingNumber: invoiceNumber,
+      proofUploaded: false,
+      timeline: [
+        {
+          status: 'Pesanan Dibuat',
+          description: `Pesanan ${invoiceNumber} berhasil dicatat di sistem Possensior.`,
+          timestamp: 'Baru saja',
+          completed: true,
+        },
+        {
+          status: 'Menunggu Pembayaran Berhasil',
+          description: 'Pesanan telah dikonfirmasi dan menunggu verifikasi bukti pembayaran QRIS dari chat WhatsApp.',
+          timestamp: 'Menunggu tindakan',
+          completed: false,
+          current: true,
+        },
+        {
+          status: 'Pengemasan & Quality Control',
+          description: 'Barang sedang dipersiapkan dan diinspeksi di warehouse Possensior.',
+          timestamp: 'Menunggu',
+          completed: false,
+        },
+        {
+          status: 'Pengiriman Kurir',
+          description: `Akan dikirim menggunakan ${courier.toUpperCase()}.`,
+          timestamp: 'Estimasi 1-2 hari',
+          completed: false,
+        },
+        {
+          status: 'Pesanan Selesai',
+          description: 'Paket telah sampai di alamat tujuan.',
+          timestamp: 'Estimasi 2-3 hari',
+          completed: false,
+        },
+      ],
+    };
 
-    // Trigger download
-    const link = document.createElement('a');
-    link.download = `QRIS-Possensior-${Date.now()}.png`;
-    link.href = canvas.toDataURL('image/png');
-    link.click();
-    setDownloadedQRIS(true);
-    setTimeout(() => setDownloadedQRIS(false), 3000);
+    const productListText = items
+      .map(
+        (it, idx) =>
+          `  ${idx + 1}. *${it.product.name}*\n     Size: ${it.selectedSize} · Warna: ${it.selectedColor} · Qty: ${it.quantity} pcs (${formatRupiah(it.product.price * it.quantity)})`
+      )
+      .join('\n');
+
+    const waMessage = 
+`Halo Admin POSSENSIOR, saya ingin konfirmasi pesanan dan mengirimkan bukti pembayaran QRIS.
+
+📦 *INFORMASI PESANAN*
+• No. Invoice: *${invoiceNumber}*
+• Tanggal: ${newOrder.createdAt}
+• Total Tagihan: *${formatRupiah(grandTotal)}* (QRIS Manual)
+
+👤 *DATA PENERIMA*
+• Nama Penerima: ${fullName.trim()}
+• No. WhatsApp / HP: ${phone.trim()}
+• Alamat Pengiriman: ${address.trim()}, ${city.trim()}, ${province} ${postalCode}
+• Ekspedisi: ${courier.toUpperCase()} (${formatRupiah(shippingCost)})
+${notes.trim() ? `• Catatan Pengiriman: ${notes.trim()}\n` : ''}
+👕 *DAFTAR PRODUK*
+${productListText}
+
+💳 *METODE PEMBAYARAN*
+• Metode: QRIS Manual POSSENSIOR
+• Total Yang Ditransfer: *${formatRupiah(grandTotal)}*
+• Status: *Menunggu Verifikasi Pembayaran*
+
+--------------------------------------------
+📌 *PENTING*:
+Saya melampirkan foto / tangkapan layar bukti transfer atau pembayaran QRIS pada pesan ini. Mohon admin segera memverifikasi pesanan saya. Terima kasih!`;
+
+    const waUrl = `https://wa.me/${QRIS_MANUAL_CONFIG.adminWhatsApp}?text=${encodeURIComponent(waMessage)}`;
+
+    // Open WhatsApp
+    window.open(waUrl, '_blank');
+
+    setIsSubmitting(false);
+    onOrderCompleted(newOrder);
   };
 
   const handleSubmitOrder = (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (paymentMethod === 'qris') {
+      handleSendProofViaWhatsApp();
+      return;
+    }
+
     if (paymentMethod === 'bank_transfer' && !uploadedProof) {
       setFormError('Wajib melampirkan foto struk transfer sebelum menekan tombol bayar dan konfirmasi.');
       return;
@@ -248,7 +369,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
         },
         paymentMethod,
         selectedBank: paymentMethod === 'bank_transfer' ? selectedBank : undefined,
-        paymentStatus: paymentMethod === 'qris' ? 'diproses' : 'menunggu_pembayaran',
+        paymentStatus: 'menunggu_pembayaran',
         trackingNumber: invoiceNumber,
         proofUploaded: !!uploadedProof,
         proofFileName: uploadedProof || undefined,
@@ -260,12 +381,10 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
             completed: true,
           },
           {
-            status: paymentMethod === 'qris' ? 'Pembayaran QRIS Dikonfirmasi' : 'Menunggu Konfirmasi Pembayaran',
-            description: paymentMethod === 'qris'
-              ? 'Pembayaran instan QRIS telah terverifikasi.'
-              : `Menunggu transfer ke rekening ${selectedBank.name}.`,
-            timestamp: paymentMethod === 'qris' ? 'Baru saja' : 'Menunggu tindakan',
-            completed: paymentMethod === 'qris',
+            status: 'Menunggu Konfirmasi Pembayaran',
+            description: `Menunggu transfer ke rekening ${selectedBank.name}.`,
+            timestamp: 'Menunggu tindakan',
+            completed: false,
             current: true,
           },
           {
@@ -291,7 +410,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
 
       setIsSubmitting(false);
       onOrderCompleted(newOrder);
-    }, 1000);
+    }, 800);
   };
 
   return (
@@ -510,73 +629,112 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
                 </button>
               </div>
 
-              {/* Dynamic QRIS Container */}
+              {/* Manual QRIS Container */}
               {paymentMethod === 'qris' && (
                 <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 text-center">
-                  <div className="flex items-center justify-between text-xs font-medium text-slate-600 mb-3 px-2">
-                    <span className="font-bold text-[#365E52]">QRIS POSSENSIOR OFFICIAL</span>
-                    <span className="flex items-center gap-1 font-mono text-amber-700 bg-amber-50 px-2 py-0.5 rounded">
-                      <Clock className="w-3.5 h-3.5" />
-                      <span>{String(countdownMinutes).padStart(2, '0')}:{String(countdownSeconds).padStart(2, '0')}</span>
+                  <div className="flex items-center justify-between text-xs font-medium text-slate-600 mb-3 px-1">
+                    <span className="font-bold text-[#365E52] flex items-center gap-1.5">
+                      <QrCode className="w-4 h-4" />
+                      <span>QRIS MANUAL POSSENSIOR</span>
+                    </span>
+                    <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100/90 px-2.5 py-0.5 rounded-full">
+                      Scan & Input Nominal Manual
                     </span>
                   </div>
 
-                  {/* Generated QRIS Code Mock Graphic */}
-                  <div className="mx-auto w-48 h-48 bg-white p-3 rounded-xl border border-slate-300 shadow-xs flex flex-col items-center justify-between">
-                    <div className="flex items-center justify-between w-full text-[10px] font-bold text-slate-700 tracking-wider">
+                  {/* Manual QRIS Image Card */}
+                  <div className="mx-auto max-w-[280px] bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center">
+                    <div className="flex items-center justify-between w-full text-[10px] font-bold text-slate-700 tracking-wider mb-2">
                       <span>QRIS</span>
+                      <span className="text-[#365E52] font-extrabold tracking-wide">POSSENSIOR</span>
                       <span>GPN</span>
                     </div>
 
-                    {/* QR Code pattern SVG */}
-                    <div className="w-36 h-36 relative flex items-center justify-center">
-                      <svg viewBox="0 0 100 100" className="w-full h-full text-slate-900 fill-current">
-                        {/* Position Markers */}
-                        <rect x="0" y="0" width="30" height="30" rx="3" fill="#18181B" />
-                        <rect x="5" y="5" width="20" height="20" rx="2" fill="white" />
-                        <rect x="10" y="10" width="10" height="10" fill="#18181B" />
-
-                        <rect x="70" y="0" width="30" height="30" rx="3" fill="#18181B" />
-                        <rect x="75" y="5" width="20" height="20" rx="2" fill="white" />
-                        <rect x="80" y="10" width="10" height="10" fill="#18181B" />
-
-                        <rect x="0" y="70" width="30" height="30" rx="3" fill="#18181B" />
-                        <rect x="5" y="75" width="20" height="20" rx="2" fill="white" />
-                        <rect x="10" y="80" width="10" height="10" fill="#18181B" />
-
-                        {/* QR Matrix Elements */}
-                        <rect x="36" y="8" width="8" height="8" fill="#18181B" />
-                        <rect x="52" y="12" width="6" height="12" fill="#18181B" />
-                        <rect x="12" y="38" width="10" height="8" fill="#18181B" />
-                        <rect x="40" y="40" width="20" height="20" rx="3" fill="#365E52" />
-                        <rect x="68" y="44" width="8" height="14" fill="#18181B" />
-                        <rect x="82" y="36" width="10" height="10" fill="#18181B" />
-                        <rect x="42" y="68" width="12" height="8" fill="#18181B" />
-                        <rect x="62" y="72" width="14" height="14" fill="#18181B" />
-                        <rect x="80" y="80" width="12" height="12" fill="#18181B" />
-                      </svg>
-                      {/* Center Brand Badge */}
-                      <div className="absolute w-7 h-7 bg-white rounded-md p-1 shadow-sm flex items-center justify-center">
-                        <PossensiorIcon className="w-5 h-5 text-[#365E52]" color="#365E52" />
+                    {/* QR Code Image Container */}
+                    <div className="w-56 h-56 relative rounded-xl overflow-hidden border border-slate-200 bg-white flex items-center justify-center p-2">
+                      <img
+                        src={QRIS_MANUAL_CONFIG.image}
+                        alt="QRIS Manual Possensior"
+                        onError={(e) => {
+                          // In case image not yet replaced, fallback to SVG visual
+                          const target = e.target as HTMLElement;
+                          target.style.display = 'none';
+                          const fallback = document.getElementById('qris-svg-fallback');
+                          if (fallback) fallback.style.display = 'flex';
+                        }}
+                        className="w-full h-full object-contain"
+                      />
+                      <div id="qris-svg-fallback" style={{ display: 'none' }} className="w-full h-full flex-col items-center justify-center">
+                        <svg viewBox="0 0 100 100" className="w-36 h-36 text-slate-900 fill-current">
+                          <rect x="0" y="0" width="30" height="30" rx="3" fill="#18181B" />
+                          <rect x="5" y="5" width="20" height="20" rx="2" fill="white" />
+                          <rect x="10" y="10" width="10" height="10" fill="#18181B" />
+                          <rect x="70" y="0" width="30" height="30" rx="3" fill="#18181B" />
+                          <rect x="75" y="5" width="20" height="20" rx="2" fill="white" />
+                          <rect x="80" y="10" width="10" height="10" fill="#18181B" />
+                          <rect x="0" y="70" width="30" height="30" rx="3" fill="#18181B" />
+                          <rect x="5" y="75" width="20" height="20" rx="2" fill="white" />
+                          <rect x="10" y="80" width="10" height="10" fill="#18181B" />
+                          <rect x="36" y="8" width="8" height="8" fill="#18181B" />
+                          <rect x="52" y="12" width="6" height="12" fill="#18181B" />
+                          <rect x="12" y="38" width="10" height="8" fill="#18181B" />
+                          <rect x="40" y="40" width="20" height="20" rx="3" fill="#365E52" />
+                          <rect x="68" y="44" width="8" height="14" fill="#18181B" />
+                          <rect x="82" y="36" width="10" height="10" fill="#18181B" />
+                          <rect x="42" y="68" width="12" height="8" fill="#18181B" />
+                          <rect x="62" y="72" width="14" height="14" fill="#18181B" />
+                          <rect x="80" y="80" width="12" height="12" fill="#18181B" />
+                        </svg>
                       </div>
                     </div>
 
-                    <span className="text-[9px] text-slate-400 font-mono">NMID: ID102003928103</span>
+                    <span className="text-[10px] text-slate-500 font-mono mt-2 font-medium">
+                      NMID: {QRIS_MANUAL_CONFIG.nmid} · {QRIS_MANUAL_CONFIG.storeName}
+                    </span>
+                  </div>
+
+                  {/* Manual Nominal Box with 1-Click Copy */}
+                  <div className="mt-4 p-3.5 bg-emerald-50/80 border border-emerald-200/90 rounded-xl max-w-sm mx-auto flex items-center justify-between shadow-2xs">
+                    <div className="text-left">
+                      <span className="text-[10px] font-bold uppercase text-[#365E52]/80 block">
+                        Nominal Yang Harus Dimasukkan Manual:
+                      </span>
+                      <span className="text-lg font-extrabold text-[#365E52] font-mono tracking-tight">
+                        {formatRupiah(grandTotal)}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleCopyAmount}
+                      className="px-3 py-1.5 bg-white hover:bg-slate-50 border border-emerald-300 text-[#365E52] text-xs font-bold rounded-lg shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                      title="Salin nominal tagihan"
+                    >
+                      {copiedAmount ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          <span className="text-emerald-700">Tersalin!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Salin Nominal</span>
+                        </>
+                      )}
+                    </button>
                   </div>
 
                   <p className="text-xs text-slate-600 mt-3 font-medium">
-                    Scan menggunakan aplikasi BCA Mobile, Livin, GoPay, OVO, Dana, atau ShopeePay.
-                  </p>
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    Total tagihan: <span className="font-bold text-[#365E52] font-mono">{formatRupiah(grandTotal)}</span>
+                    Buka m-banking (BCA, Livin, dll) atau e-wallet (GoPay, OVO, Dana, ShopeePay). Scan QRIS di atas dan ketikkan nominal manual sebesar <strong className="text-[#365E52] font-mono">{formatRupiah(grandTotal)}</strong>.
                   </p>
 
-                  {/* Download QRIS button */}
-                  <div className="mt-4 flex flex-col items-center gap-1.5">
+                  {/* Action Buttons: Unduh QRIS & Kirim Bukti Pembayaran */}
+                  <div className="mt-4 flex flex-col items-center gap-2 max-w-sm mx-auto">
+                    {/* Tombol Unduh Kode QRIS */}
                     <button
                       type="button"
                       onClick={handleDownloadQRIS}
-                      className={`px-4 py-2.5 border text-xs font-bold rounded-xl transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer ${
+                      className={`w-full py-2.5 border text-xs font-bold rounded-xl transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer ${
                         downloadedQRIS
                           ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
                           : 'bg-white hover:bg-[#365E52]/5 border-slate-300 text-[#365E52]'
@@ -594,8 +752,19 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
                         </>
                       )}
                     </button>
-                    <span className="text-[10px] text-slate-400">
-                      Simpan QRIS ke galeri perangkat Anda untuk di-scan via aplikasi m-banking atau e-wallet
+
+                    {/* Tombol Kirim Bukti Pembayaran dibawah tombol unduh */}
+                    <button
+                      type="button"
+                      onClick={handleSendProofViaWhatsApp}
+                      className="w-full py-3.5 bg-[#25D366] hover:bg-[#20ba59] text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99]"
+                    >
+                      <MessageCircle className="w-4 h-4 fill-current" />
+                      <span>Kirim Bukti Pembayaran</span>
+                    </button>
+
+                    <span className="text-[10px] text-slate-500 leading-tight">
+                      Setelah mengklik tombol di atas, Anda akan diarahkan ke WhatsApp untuk mengirim bukti pembayaran. Pesanan Anda akan otomatis dicatat dan menunggu verifikasi.
                     </span>
                   </div>
                 </div>
@@ -790,11 +959,18 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
                       className={`w-full py-4 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 ${
                         isButtonDisabled
                           ? 'bg-slate-300 text-slate-500 cursor-not-allowed opacity-90 border border-slate-300 shadow-none pointer-events-none'
-                          : 'bg-[#365E52] hover:bg-[#2A4B41] text-white shadow-md cursor-pointer active:scale-[0.99]'
+                          : paymentMethod === 'qris'
+                            ? 'bg-[#25D366] hover:bg-[#20ba59] text-white shadow-md cursor-pointer active:scale-[0.99]'
+                            : 'bg-[#365E52] hover:bg-[#2A4B41] text-white shadow-md cursor-pointer active:scale-[0.99]'
                       }`}
                     >
                       {isSubmitting ? (
                         <span>Memproses Pesanan...</span>
+                      ) : paymentMethod === 'qris' ? (
+                        <>
+                          <MessageCircle className="w-4 h-4 fill-current" />
+                          <span>Kirim Bukti Pembayaran</span>
+                        </>
                       ) : (
                         <>
                           <span>Bayar dan Konfirmasi</span>

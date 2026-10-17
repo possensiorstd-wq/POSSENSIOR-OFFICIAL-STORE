@@ -222,3 +222,10 @@ export const SIZE_CHART = [
   { size: 'L', chest: '60 cm', length: '74 cm', shoulder: '58 cm', sleeve: '24 cm' },
   { size: 'XL', chest: '63 cm', length: '77 cm', shoulder: '61 cm', sleeve: '25 cm' },
 ];
+
+export const QRIS_MANUAL_CONFIG = {
+  image: '/src/assets/images/qris_manual.png',
+  adminWhatsApp: '6281234567890',
+  storeName: 'POSSENSIOR OFFICIAL',
+  nmid: 'ID102003928103',
+};
