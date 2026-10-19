@@ -26,7 +26,8 @@ import {
 } from 'lucide-react';
 import { PossensiorWordmark } from './Logos';
 import { BatchReceiptPrintModal } from './BatchReceiptPrintModal';
-import { compressImageIfExceeds, extractDominantColorsFromImage } from '../utils/colorExtractor';
+import { SingleReceiptPrintModal } from './SingleReceiptPrintModal';
+import { compressImageIfExceeds } from '../utils/colorExtractor';
 import { 
   supabase, 
   OWNER_UID, 
@@ -40,6 +41,7 @@ interface OwnerControlProps {
   onClose: () => void;
   orders: Order[];
   onUpdateOrder: (updatedOrder: Order) => void;
+  onDeleteOrder?: (orderId: string) => Promise<boolean> | boolean;
   products: Product[];
   onAddProduct: (newProduct: Product) => Promise<boolean>;
   onUpdateProduct: (updatedProduct: Product) => Promise<boolean>;
@@ -54,6 +56,7 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
   onClose,
   orders,
   onUpdateOrder,
+  onDeleteOrder,
   products,
   onAddProduct,
   onUpdateProduct,
@@ -75,6 +78,8 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
   const [activeTab, setActiveTab] = useState<'orders' | 'catalog'>('orders');
   const [orderStatusFilter, setOrderStatusFilter] = useState<string>('all');
   const [showBatchPrint, setShowBatchPrint] = useState(false);
+  const [singlePrintOrder, setSinglePrintOrder] = useState<Order | null>(null);
+  const [isDeletingOrderId, setIsDeletingOrderId] = useState<string | null>(null);
 
   // Temporary edit states for resi input
   const [resiInputs, setResiInputs] = useState<{ [orderId: string]: string }>({});
@@ -259,6 +264,38 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
     alert(`Nomor resi ${resiValue.trim()} berhasil disimpan dan status pesanan diperbarui menjadi "dikirim".`);
   };
 
+  // Single Order Receipt Printing
+  const handlePrintSingleOrder = (order: Order) => {
+    setSinglePrintOrder(order);
+  };
+
+  // Delete Order with explicit user confirmation
+  const handleDeleteOrderClick = async (order: Order) => {
+    const confirmed = window.confirm(
+      'Apakah kamu yakin ingin menghapus pesanan ini? Pesanan yang dihapus tidak dapat dikembalikan.'
+    );
+    if (!confirmed) return;
+
+    if (!onDeleteOrder) {
+      alert('Fitur hapus pesanan tidak tersedia.');
+      return;
+    }
+
+    setIsDeletingOrderId(order.id);
+    try {
+      const ok = await onDeleteOrder(order.id);
+      if (ok) {
+        alert(`Pesanan ${order.invoiceNumber} berhasil dihapus.`);
+      } else {
+        alert(`Gagal menghapus pesanan ${order.invoiceNumber}.`);
+      }
+    } catch (err: any) {
+      alert(`Terjadi kendala saat menghapus pesanan: ${err?.message || 'Error tidak diketahui'}`);
+    } finally {
+      setIsDeletingOrderId(null);
+    }
+  };
+
   // Image Upload with Automatic Compression (>5MB), Dominant Color Extraction,
   // and direct online upload to Supabase Storage bucket "POSSENSIOR MEDIA" in "catalog/"
   const handleImageFileChange = async (
@@ -280,14 +317,6 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
         setFormImageNotice(
           `Gambar diproses (${(result.originalSize / 1024 / 1024).toFixed(1)} MB). Mengunggah ke bucket "POSSENSIOR MEDIA"...`
         );
-      }
-
-      // Extract Dominant Colors Automatically if main image
-      if (!isDetail) {
-        const extracted = await extractDominantColorsFromImage(result.dataUrl);
-        if (extracted && extracted.length > 0) {
-          setFormColors(extracted);
-        }
       }
 
       // Convert to binary Blob and upload to bucket "POSSENSIOR MEDIA" inside "catalog/" folder
@@ -331,9 +360,47 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
     setFormTag(prod.tag || '');
     setFormImage(prod.image);
     setFormAdditionalImages(prod.additionalImages || []);
-    setFormColors(prod.colors);
-    setFormSizes(prod.sizes);
-    setFormSizeChart(prod.customSizeChart || SIZE_CHART);
+
+    // Clean deduplicated colors from saved product data (by name)
+    const seenCol = new Set<string>();
+    const cleanColors: { name: string; hex: string }[] = [];
+    if (prod.colors && Array.isArray(prod.colors)) {
+      for (const c of prod.colors) {
+        if (!c || !c.name) continue;
+        const trimmed = c.name.trim();
+        if (!trimmed) continue;
+        const key = trimmed.toLowerCase();
+        if (!seenCol.has(key)) {
+          seenCol.add(key);
+          cleanColors.push({
+            name: trimmed,
+            hex: c.hex && c.hex.trim() ? c.hex.trim() : '#18181B',
+          });
+        }
+      }
+    }
+    setFormColors(cleanColors.length > 0 ? cleanColors : [{ name: 'Washed Black', hex: '#18181B' }]);
+
+    // Load custom size chart rows if present, or match product sizes (never reset to default if custom exists)
+    const initialChart =
+      prod.customSizeChart && prod.customSizeChart.length > 0
+        ? prod.customSizeChart
+        : prod.sizes && prod.sizes.length > 0
+        ? prod.sizes.map((sz) => {
+            const match = SIZE_CHART.find((row) => row.size.toUpperCase() === sz.toUpperCase());
+            return (
+              match || {
+                size: sz,
+                chest: '57 cm',
+                length: '71 cm',
+                shoulder: '55 cm',
+                sleeve: '23 cm',
+              }
+            );
+          })
+        : SIZE_CHART;
+
+    setFormSizeChart(initialChart);
     setFormImageNotice(null);
   };
 
@@ -357,8 +424,13 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
       { name: 'Pitch Black', hex: '#18181B' },
       { name: 'Sage Green', hex: '#365E52' },
     ]);
-    setFormSizes(['S', 'M', 'L', 'XL']);
-    setFormSizeChart(SIZE_CHART);
+    const defaultChart = [
+      { size: 'S', chest: '54 cm', length: '68 cm', shoulder: '52 cm', sleeve: '22 cm' },
+      { size: 'M', chest: '57 cm', length: '71 cm', shoulder: '55 cm', sleeve: '23 cm' },
+      { size: 'L', chest: '60 cm', length: '74 cm', shoulder: '58 cm', sleeve: '24 cm' },
+      { size: 'XL', chest: '63 cm', length: '77 cm', shoulder: '61 cm', sleeve: '25 cm' },
+    ];
+    setFormSizeChart(defaultChart);
     setFormImageNotice(null);
   };
 
@@ -367,6 +439,11 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
     e.preventDefault();
     if (!formName.trim() || !formPrice) {
       alert('Nama produk dan harga wajib diisi.');
+      return;
+    }
+
+    if (formSizeChart.length === 0) {
+      alert('Minimal harus ada 1 ukuran pada Size Chart.');
       return;
     }
 
@@ -404,6 +481,51 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
         }
       }
 
+      // Deduplicate colors strictly by name to prevent duplicates or redundant options
+      const seenColNames = new Set<string>();
+      const cleanColors: { name: string; hex: string }[] = [];
+      for (const c of formColors) {
+        if (!c || !c.name) continue;
+        const trimmedName = c.name.trim();
+        if (!trimmedName) continue;
+        const key = trimmedName.toLowerCase();
+        if (!seenColNames.has(key)) {
+          seenColNames.add(key);
+          cleanColors.push({
+            name: trimmedName,
+            hex: c.hex && c.hex.trim() ? c.hex.trim() : '#18181B',
+          });
+        }
+      }
+
+      // Clean, trim, and validate Size Chart rows
+      const cleanSizeChart = formSizeChart
+        .map((r) => ({
+          size: r.size.trim(),
+          chest: r.chest.trim() || '-',
+          length: r.length.trim() || '-',
+          shoulder: r.shoulder.trim() || '-',
+          sleeve: r.sleeve.trim() || '-',
+        }))
+        .filter((r) => r.size.length > 0);
+
+      if (cleanSizeChart.length === 0) {
+        alert('Minimal harus ada 1 baris ukuran yang valid pada Size Chart.');
+        setIsSavingProduct(false);
+        return;
+      }
+
+      // Derive active sizes directly from clean Size Chart rows (preserves user casing, deduplicated)
+      const seenSizes = new Set<string>();
+      const finalSizes: string[] = [];
+      for (const row of cleanSizeChart) {
+        const key = row.size.toLowerCase();
+        if (!seenSizes.has(key)) {
+          seenSizes.add(key);
+          finalSizes.push(row.size);
+        }
+      }
+
       const payload: Product = {
         id: editingProduct ? editingProduct.id : `poss-${Date.now()}`,
         name: formName.trim(),
@@ -415,11 +537,11 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
         description: formDescription.trim() || 'Koleksi apparel boxy fit Possensior dengan jahitan presisi.',
         material: formMaterial.trim(),
         fit: formFit.trim(),
-        sizes: formSizes,
-        colors: formColors,
+        sizes: finalSizes.length > 0 ? finalSizes : ['All Size'],
+        colors: cleanColors.length > 0 ? cleanColors : [{ name: 'Pitch Black', hex: '#18181B' }],
         image: finalMainImage,
         additionalImages: finalAdditionalImages,
-        customSizeChart: formSizeChart,
+        customSizeChart: cleanSizeChart,
         inStock: formStock > 0,
         stockCount: Number(formStock),
         tag: formTag.trim() || undefined,
@@ -452,7 +574,7 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
 
   // Color Variant Helpers
   const handleAddColor = () => {
-    setFormColors([...formColors, { name: 'New Color', hex: '#365E52' }]);
+    setFormColors([...formColors, { name: 'Warna Baru', hex: '#365E52' }]);
   };
 
   const handleUpdateColor = (index: number, field: 'name' | 'hex', val: string) => {
@@ -462,26 +584,43 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
   };
 
   const handleRemoveColor = (index: number) => {
+    if (formColors.length <= 1) {
+      alert('Minimal harus ada 1 varian warna.');
+      return;
+    }
     setFormColors((prev) => prev.filter((_, i) => i !== index));
   };
 
-  // Size Chart Helpers
+  // Size Chart Helpers (Menambah, Mengubah & Menghapus Ukuran secara dinamis)
+  const handleAddSizeRow = () => {
+    const existingSizes = formSizeChart.map((r) => r.size.toUpperCase().trim());
+    const candidates = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL', 'All Size'];
+    const nextSize = candidates.find((s) => !existingSizes.includes(s)) || `Size-${formSizeChart.length + 1}`;
+
+    setFormSizeChart((prev) => [
+      ...prev,
+      { size: nextSize, chest: '60 cm', length: '74 cm', shoulder: '58 cm', sleeve: '24 cm' },
+    ]);
+  };
+
   const handleUpdateSizeRow = (index: number, field: string, val: string) => {
     setFormSizeChart((prev) =>
       prev.map((r, i) => (i === index ? { ...r, [field]: val } : r))
     );
   };
 
-  const handleToggleSize = (size: ProductSize) => {
-    if (formSizes.includes(size)) {
-      if (formSizes.length <= 1) {
-        alert('Minimal harus ada satu ukuran produk.');
-        return;
-      }
-      setFormSizes(formSizes.filter((s) => s !== size));
-    } else {
-      setFormSizes([...formSizes, size]);
+  const handleRemoveSizeRow = (index: number) => {
+    if (formSizeChart.length <= 1) {
+      alert('Minimal harus ada 1 baris ukuran pada Size Chart agar pelanggan dapat memilih ukuran.');
+      return;
     }
+    const targetSize = formSizeChart[index]?.size || 'ini';
+    const confirmed = window.confirm(
+      `Apakah kamu yakin ingin menghapus ukuran "${targetSize}" dari Size Chart produk ini?`
+    );
+    if (!confirmed) return;
+
+    setFormSizeChart((prev) => prev.filter((_, i) => i !== index));
   };
 
   // Filtered orders
@@ -738,7 +877,7 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
                               </p>
                             </div>
 
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               {/* Change Status Dropdown */}
                               <select
                                 value={order.paymentStatus}
@@ -751,6 +890,33 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
                                 <option value="dikirim">Dikirim ke Kurir</option>
                                 <option value="selesai">Selesai Diterima</option>
                               </select>
+
+                              {/* Tombol Cetak Resi Individual */}
+                              <button
+                                type="button"
+                                onClick={() => handlePrintSingleOrder(order)}
+                                className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border border-slate-200 shadow-2xs hover:border-slate-300 active:scale-95"
+                                title={`Cetak resi untuk pesanan ${order.invoiceNumber}`}
+                              >
+                                <Printer className="w-3.5 h-3.5 text-[#365E52]" />
+                                <span>Cetak Resi</span>
+                              </button>
+
+                              {/* Tombol Hapus Pesanan Individual */}
+                              <button
+                                type="button"
+                                disabled={isDeletingOrderId === order.id}
+                                onClick={() => handleDeleteOrderClick(order)}
+                                className="px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border border-red-200 shadow-2xs disabled:opacity-50 active:scale-95"
+                                title={`Hapus pesanan ${order.invoiceNumber}`}
+                              >
+                                {isDeletingOrderId === order.id ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin text-red-600" />
+                                ) : (
+                                  <Trash2 className="w-3.5 h-3.5 text-red-600" />
+                                )}
+                                <span>Hapus</span>
+                              </button>
                             </div>
                           </div>
 
@@ -1138,47 +1304,51 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
                   )}
                 </div>
 
-                {/* Color Variants Manager (with automatic dominant color detection) */}
+                {/* Color Variants Manager (Strict source of truth for catalog color choices) */}
                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl">
                   <div className="flex items-center justify-between mb-2">
                     <div>
                       <h4 className="font-bold text-slate-800 flex items-center gap-1.5">
                         <Palette className="w-3.5 h-3.5 text-[#365E52]" />
-                        <span>Varian Warna (Warna Dominan Diekstrak Otomatis)</span>
+                        <span>Pilihan Varian Warna Produk</span>
                       </h4>
                       <p className="text-[11px] text-slate-500">
-                        Owner dapat menambah, mengubah nama, atau memilih kode warna secara langsung.
+                        Hanya warna yang ditambahkan di sini yang akan muncul sebagai pilihan di katalog pelanggan.
                       </p>
                     </div>
                     <button
                       type="button"
                       onClick={handleAddColor}
-                      className="px-2.5 py-1 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg font-bold text-[11px] text-[#365E52] cursor-pointer"
+                      className="px-2.5 py-1 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg font-bold text-[11px] text-[#365E52] flex items-center gap-1 cursor-pointer transition-colors"
                     >
-                      + Tambah Warna
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>+ Tambah Warna</span>
                     </button>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
                     {formColors.map((color, idx) => (
-                      <div key={idx} className="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200">
+                      <div key={idx} className="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 shadow-2xs">
                         <input
                           type="color"
                           value={color.hex}
                           onChange={(e) => handleUpdateColor(idx, 'hex', e.target.value)}
-                          className="w-7 h-7 rounded border-none cursor-pointer"
+                          className="w-7 h-7 rounded border-none cursor-pointer shrink-0"
+                          title="Pilih kode warna swatch"
                         />
                         <input
                           type="text"
                           value={color.name}
                           onChange={(e) => handleUpdateColor(idx, 'name', e.target.value)}
-                          placeholder="Nama warna"
-                          className="flex-1 p-1 border border-slate-200 rounded text-xs focus:outline-none"
+                          placeholder="Nama warna (cth: Washed Black)"
+                          className="flex-1 p-1 border border-slate-200 rounded text-xs focus:outline-none focus:border-[#365E52]"
                         />
                         <button
                           type="button"
                           onClick={() => handleRemoveColor(idx)}
-                          className="text-slate-400 hover:text-red-500 p-1 cursor-pointer"
+                          disabled={formColors.length <= 1}
+                          className="text-slate-400 hover:text-red-500 p-1 rounded transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                          title={formColors.length <= 1 ? "Minimal 1 varian warna harus tersisa" : "Hapus warna ini"}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -1187,86 +1357,114 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
                   </div>
                 </div>
 
-                {/* Size Chart & Sizes Editor */}
+                {/* Size Chart & Sizes Editor (Add, edit size name, edit measurements, and delete rows) */}
                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl">
-                  <div className="flex items-center justify-between mb-2">
-                    <h4 className="font-bold text-slate-800 flex items-center gap-1.5">
-                      <Ruler className="w-3.5 h-3.5 text-[#365E52]" />
-                      <span>Edit Size Chart & Ukuran Tersedia</span>
-                    </h4>
-                  </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                    <div>
+                      <h4 className="font-bold text-slate-800 flex items-center gap-1.5">
+                        <Ruler className="w-3.5 h-3.5 text-[#365E52]" />
+                        <span>Panduan Ukuran & Size Chart Produk</span>
+                      </h4>
+                      <p className="text-[11px] text-slate-500">
+                        Setiap ukuran yang ada di tabel ini otomatis menjadi opsi ukuran yang dapat dipilih pelanggan di katalog.
+                      </p>
+                    </div>
 
-                  {/* Size toggles */}
-                  <div className="mb-3 flex items-center gap-2">
-                    <span className="font-semibold text-slate-700">Aktifkan Ukuran:</span>
-                    {(['S', 'M', 'L', 'XL'] as ProductSize[]).map((sz) => (
-                      <button
-                        key={sz}
-                        type="button"
-                        onClick={() => handleToggleSize(sz)}
-                        className={`px-3 py-1 rounded-md text-xs font-bold border transition-colors cursor-pointer ${
-                          formSizes.includes(sz)
-                            ? 'bg-[#365E52] text-white border-[#365E52]'
-                            : 'bg-white text-slate-500 border-slate-300'
-                        }`}
-                      >
-                        {sz}
-                      </button>
-                    ))}
+                    <button
+                      type="button"
+                      onClick={handleAddSizeRow}
+                      className="px-3 py-1.5 bg-[#365E52] hover:bg-[#2A4B41] text-white rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer self-start sm:self-auto"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>+ Tambah Ukuran</span>
+                    </button>
                   </div>
 
                   {/* Size chart values table */}
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left font-mono text-[11px] bg-white rounded-lg border border-slate-200">
+                  <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                    <table className="w-full text-left font-mono text-[11px]">
                       <thead>
                         <tr className="bg-slate-100 border-b border-slate-200 text-slate-700">
-                          <th className="p-2">Size</th>
-                          <th className="p-2">Lebar Dada</th>
-                          <th className="p-2">Panjang</th>
-                          <th className="p-2">Lebar Bahu</th>
-                          <th className="p-2">Panjang Lengan</th>
+                          <th className="p-2.5 font-bold">Ukuran (Size)</th>
+                          <th className="p-2.5 font-bold">Lebar Dada</th>
+                          <th className="p-2.5 font-bold">Panjang</th>
+                          <th className="p-2.5 font-bold">Lebar Bahu</th>
+                          <th className="p-2.5 font-bold">Panjang Lengan</th>
+                          <th className="p-2.5 font-bold text-center w-14">Aksi</th>
                         </tr>
                       </thead>
-                      <tbody>
+                      <tbody className="divide-y divide-slate-100">
                         {formSizeChart.map((row, idx) => (
-                          <tr key={row.size} className="border-b border-slate-100 last:border-none">
-                            <td className="p-2 font-bold text-[#365E52]">{row.size}</td>
-                            <td className="p-1">
+                          <tr key={idx} className="hover:bg-slate-50/70 transition-colors">
+                            <td className="p-2">
+                              <input
+                                type="text"
+                                value={row.size}
+                                onChange={(e) => handleUpdateSizeRow(idx, 'size', e.target.value)}
+                                placeholder="cth: XXL"
+                                className="w-24 p-1.5 border border-slate-300 rounded-md font-bold text-[#365E52] bg-white focus:outline-none focus:border-[#365E52]"
+                              />
+                            </td>
+                            <td className="p-2">
                               <input
                                 type="text"
                                 value={row.chest}
                                 onChange={(e) => handleUpdateSizeRow(idx, 'chest', e.target.value)}
-                                className="w-20 p-1 border border-slate-200 rounded text-center"
+                                placeholder="cth: 60 cm"
+                                className="w-24 p-1.5 border border-slate-200 rounded-md text-slate-700 bg-white focus:outline-none focus:border-[#365E52]"
                               />
                             </td>
-                            <td className="p-1">
+                            <td className="p-2">
                               <input
                                 type="text"
                                 value={row.length}
                                 onChange={(e) => handleUpdateSizeRow(idx, 'length', e.target.value)}
-                                className="w-20 p-1 border border-slate-200 rounded text-center"
+                                placeholder="cth: 74 cm"
+                                className="w-24 p-1.5 border border-slate-200 rounded-md text-slate-700 bg-white focus:outline-none focus:border-[#365E52]"
                               />
                             </td>
-                            <td className="p-1">
+                            <td className="p-2">
                               <input
                                 type="text"
                                 value={row.shoulder}
                                 onChange={(e) => handleUpdateSizeRow(idx, 'shoulder', e.target.value)}
-                                className="w-20 p-1 border border-slate-200 rounded text-center"
+                                placeholder="cth: 58 cm"
+                                className="w-24 p-1.5 border border-slate-200 rounded-md text-slate-700 bg-white focus:outline-none focus:border-[#365E52]"
                               />
                             </td>
-                            <td className="p-1">
+                            <td className="p-2">
                               <input
                                 type="text"
                                 value={row.sleeve}
                                 onChange={(e) => handleUpdateSizeRow(idx, 'sleeve', e.target.value)}
-                                className="w-20 p-1 border border-slate-200 rounded text-center"
+                                placeholder="cth: 24 cm"
+                                className="w-24 p-1.5 border border-slate-200 rounded-md text-slate-700 bg-white focus:outline-none focus:border-[#365E52]"
                               />
+                            </td>
+                            <td className="p-2 text-center">
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveSizeRow(idx)}
+                                disabled={formSizeChart.length <= 1}
+                                className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                                title={
+                                  formSizeChart.length <= 1
+                                    ? 'Minimal harus ada 1 ukuran tersisa'
+                                    : `Hapus ukuran ${row.size || `baris ke-${idx + 1}`}`
+                                }
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
                             </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
+                  </div>
+
+                  <div className="mt-2.5 flex items-center justify-between text-[11px] text-slate-500">
+                    <span>*Nilai pengukuran dapat diisi bebas secara manual (contoh: 54 cm, 60 cm, dsb).</span>
+                    <span className="font-medium text-[#365E52]">Total {formSizeChart.length} ukuran aktif</span>
                   </div>
                 </div>
 
@@ -1306,6 +1504,13 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
             </div>
           </div>
         )}
+
+        {/* Single Order Shipping Receipt Print Modal */}
+        <SingleReceiptPrintModal
+          isOpen={!!singlePrintOrder}
+          onClose={() => setSinglePrintOrder(null)}
+          order={singlePrintOrder}
+        />
 
         {/* Batch Shipping Label Print Modal */}
         <BatchReceiptPrintModal

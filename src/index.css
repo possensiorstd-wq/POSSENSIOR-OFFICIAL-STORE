@@ -51,3 +51,58 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #365e52;
 }
+
+/* Print optimization for thermal and standard paper receipts */
+@media print {
+  html, body {
+    background: white !important;
+    color: black !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* Hide all regular UI and background modals */
+  body * {
+    visibility: hidden;
+  }
+
+  /* Only make the active print zone and its children visible */
+  .possensior-print-zone,
+  .possensior-print-zone * {
+    visibility: visible !important;
+  }
+
+  .possensior-print-zone {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 8px !important;
+    background: white !important;
+    box-shadow: none !important;
+    border: none !important;
+    overflow: visible !important;
+  }
+
+  /* Ensure colors, barcodes, and borders render cleanly */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Explicitly remove buttons, backdrops, and navigation */
+  .no-print,
+  .print\:hidden,
+  .print-modal-backdrop,
+  header,
+  nav,
+  footer {
+    display: none !important;
+    visibility: hidden !important;
+  }
+}
+

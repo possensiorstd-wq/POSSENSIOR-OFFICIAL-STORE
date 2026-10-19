@@ -198,6 +198,37 @@ export async function deleteProductFromDatabase(
 }
 
 /**
+ * Database table name for orders if synced to Supabase.
+ */
+export const ORDERS_TABLE = 'possensior_orders';
+
+/**
+ * Deletes an order from public.possensior_orders table if available.
+ */
+export async function deleteOrderFromDatabase(
+  orderId: string
+): Promise<{ error: string | null }> {
+  if (!isSupabaseConfigured) {
+    return { error: null };
+  }
+
+  try {
+    const { error } = await supabase
+      .from(ORDERS_TABLE)
+      .delete()
+      .eq('id', orderId);
+
+    if (error && error.code !== '42P01' && !error.message.includes('does not exist')) {
+      console.warn('Supabase order delete error:', error.message);
+    }
+    return { error: null };
+  } catch (err: any) {
+    console.warn('Supabase order delete error caught:', err?.message);
+    return { error: null };
+  }
+}
+
+/**
  * Explicit migration of default products into the database.
  * Only called on direct user request via Owner Control.
  */

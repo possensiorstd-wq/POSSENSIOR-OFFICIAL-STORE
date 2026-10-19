@@ -24,6 +24,35 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     }).format(num);
   };
 
+  const cleanColors = React.useMemo(() => {
+    const seen = new Set<string>();
+    const res: { name: string; hex: string }[] = [];
+    if (product.colors && Array.isArray(product.colors)) {
+      for (const c of product.colors) {
+        if (!c || !c.name) continue;
+        const nameTrimmed = c.name.trim();
+        if (!nameTrimmed) continue;
+        const key = nameTrimmed.toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          res.push({
+            name: nameTrimmed,
+            hex: c.hex && c.hex.trim() ? c.hex.trim() : '#18181B',
+          });
+        }
+      }
+    }
+    return res;
+  }, [product.colors]);
+
+  const [activeColorIndex, setActiveColorIndex] = useState(0);
+
+  const allImages = React.useMemo(() => {
+    return [product.image, ...(product.additionalImages || [])].filter(Boolean);
+  }, [product.image, product.additionalImages]);
+
+  const activeDisplayImage = allImages[activeColorIndex] || product.image;
+
   return (
     <div
       onClick={() => onOpenDetail(product)}
@@ -33,7 +62,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
       <div className="relative w-full aspect-[4/3] bg-stone-100 overflow-hidden flex items-center justify-center">
         {!imageError ? (
           <img
-            src={product.image}
+            src={activeDisplayImage}
             alt={product.name}
             referrerPolicy="no-referrer"
             onError={() => setImageError(true)}
@@ -82,6 +111,38 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           <p className="text-xs text-slate-500 mt-1 line-clamp-1">
             {product.subtitle}
           </p>
+
+          {/* Color swatches preview on card (strictly from saved product data, exactly 1 swatch per color) */}
+          {cleanColors.length > 0 && (
+            <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+              <div className="flex items-center gap-1.5">
+                {cleanColors.map((color, idx) => {
+                  const isSelected = activeColorIndex === idx;
+                  return (
+                    <button
+                      key={`${color.name}-${color.hex}-${idx}`}
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveColorIndex(idx);
+                      }}
+                      className={`w-3.5 h-3.5 rounded-full border shrink-0 transition-all cursor-pointer ${
+                        isSelected
+                          ? 'ring-2 ring-[#365E52] ring-offset-1 scale-110 border-black/30 shadow-xs'
+                          : 'border-black/20 hover:scale-105 opacity-80 hover:opacity-100'
+                      }`}
+                      style={{ backgroundColor: color.hex }}
+                      title={`Pilih warna ${color.name}`}
+                      aria-label={`Pilih warna ${color.name}`}
+                    />
+                  );
+                })}
+              </div>
+              <span className="text-[11px] text-slate-500 font-medium truncate max-w-[140px]">
+                {cleanColors[activeColorIndex]?.name || cleanColors[0]?.name}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Pricing & Quick Add Button */}

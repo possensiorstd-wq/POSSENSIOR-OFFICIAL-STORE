@@ -1,6 +1,6 @@
 export type ProductCategory = 'all' | 'tshirt' | 'longsleeve' | 'outerwear';
 
-export type ProductSize = 'S' | 'M' | 'L' | 'XL';
+export type ProductSize = string;
 
 export interface Product {
   id: string;

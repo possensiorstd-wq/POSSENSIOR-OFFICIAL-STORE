@@ -45,7 +45,7 @@ export const ShippingReceiptCard: React.FC<ShippingReceiptCardProps> = ({
       </div>
 
       {/* Barcode & Transit Tag */}
-      <div className="flex items-center justify-between bg-slate-50 border border-slate-300 p-2 rounded-lg mb-3">
+      <div className="flex items-center justify-between bg-slate-50 border border-slate-300 p-2.5 rounded-lg mb-3">
         <div>
           <span className="text-[9px] font-bold uppercase text-slate-500 block">Barcode Resi Paket</span>
           {/* Crisp Vector Barcode representation */}
@@ -113,42 +113,83 @@ export const ShippingReceiptCard: React.FC<ShippingReceiptCardProps> = ({
         </div>
       </div>
 
-      {/* Items List */}
+      {/* Items List with details: Product, Variation, Qty, Unit Price, and Item Subtotal */}
       <div className="text-xs">
         <span className="text-[10px] font-bold uppercase text-slate-600 block mb-1">
-          Daftar Isi Paket ({totalQuantity} pcs apparel boxy):
+          Daftar Produk Pesanan ({totalQuantity} pcs apparel boxy):
         </span>
         <div className="divide-y divide-slate-200 border border-slate-300 rounded-lg overflow-hidden">
+          <div className="bg-slate-100 px-3 py-1.5 text-[10px] font-bold text-slate-700 grid grid-cols-12 uppercase">
+            <span className="col-span-6">Produk & Variasi</span>
+            <span className="col-span-2 text-center">Harga Satuan</span>
+            <span className="col-span-2 text-center">Qty</span>
+            <span className="col-span-2 text-right">Subtotal</span>
+          </div>
           {order.items.map((item) => (
-            <div key={item.id} className="p-2 flex justify-between items-center bg-white text-xs">
-              <div>
-                <span className="font-bold text-black">{item.product.name}</span>
-                <span className="text-slate-600 text-[11px] ml-2">
-                  (Size: {item.selectedSize} · Warna: {item.selectedColor})
+            <div key={item.id} className="p-2.5 grid grid-cols-12 items-center bg-white text-xs">
+              <div className="col-span-6">
+                <span className="font-bold text-black block">{item.product.name}</span>
+                <span className="text-slate-600 text-[11px]">
+                  Size: {item.selectedSize} · Warna: {item.selectedColor}
                 </span>
               </div>
-              <span className="font-mono font-bold text-black">{item.quantity} pcs</span>
+              <span className="col-span-2 text-center font-mono text-slate-700">
+                {formatRupiah(item.product.price)}
+              </span>
+              <span className="col-span-2 text-center font-mono font-bold text-black">
+                {item.quantity} pcs
+              </span>
+              <span className="col-span-2 text-right font-mono font-bold text-black">
+                {formatRupiah(item.product.price * item.quantity)}
+              </span>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Footer Total & Payment Information */}
-      <div className="mt-3 pt-2.5 border-t border-slate-300 flex justify-between items-center text-xs">
-        <div className="text-slate-700">
-          <span>Status: </span>
-          <strong className="uppercase text-black">{order.paymentStatus}</strong>
-          <span className="mx-1.5">·</span>
-          <span>Metode: </span>
-          <strong className="uppercase text-black">
-            {order.paymentMethod === 'qris' ? 'QRIS Instan' : `Transfer Bank (${order.selectedBank?.name || 'Manual'})`}
-          </strong>
-        </div>
-        <div className="text-right">
-          <span className="text-[10px] text-slate-500 block uppercase">Total Transaksi</span>
-          <span className="font-mono font-extrabold text-base text-black">
-            {formatRupiah(order.total)}
-          </span>
+      {/* Footer Breakdown: Subtotal, Ongkir, Diskon, Total & Status */}
+      <div className="mt-3 pt-3 border-t border-slate-300 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
+          <div className="space-y-1 text-slate-700">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-semibold">Status Pesanan:</span>
+              <span className="font-bold uppercase text-black bg-slate-100 px-2 py-0.5 rounded border border-slate-200 text-[10px]">
+                {order.paymentStatus.replace('_', ' ')}
+              </span>
+            </div>
+            <div className="text-[11px]">
+              <span className="font-semibold">Metode Pembayaran: </span>
+              <strong className="uppercase text-black">
+                {order.paymentMethod === 'qris'
+                  ? 'QRIS Manual (Scan QR)'
+                  : `Transfer Bank (${order.selectedBank?.name || 'Manual'})`}
+              </strong>
+            </div>
+            <div className="text-[10px] text-slate-500 font-mono">
+              Resi Pengiriman Resmi POSSENSIOR
+            </div>
+          </div>
+
+          <div className="space-y-1 font-mono text-right bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+            <div className="flex justify-between text-slate-600 text-xs">
+              <span>Subtotal Produk:</span>
+              <span className="font-semibold text-black">{formatRupiah(order.subtotal)}</span>
+            </div>
+            <div className="flex justify-between text-slate-600 text-xs">
+              <span>Biaya Kirim ({order.shipping.courier.toUpperCase()}):</span>
+              <span className="font-semibold text-black">{formatRupiah(order.shippingCost)}</span>
+            </div>
+            {order.discount > 0 && (
+              <div className="flex justify-between text-emerald-700 text-xs">
+                <span>Diskon Kupon Promo:</span>
+                <span className="font-semibold">- {formatRupiah(order.discount)}</span>
+              </div>
+            )}
+            <div className="flex justify-between border-t border-black pt-1.5 mt-1 text-xs font-bold text-black">
+              <span className="uppercase text-[11px]">Total Pembayaran:</span>
+              <span className="text-sm font-extrabold text-black">{formatRupiah(order.total)}</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>

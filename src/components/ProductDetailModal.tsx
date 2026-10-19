@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Product, ProductSize } from '../types/store';
-import { X, Check, ShoppingBag, ShieldCheck, Truck, Ruler, Sparkles, Palette } from 'lucide-react';
+import { X, Check, ShoppingBag, ShieldCheck, Truck, Ruler, Palette } from 'lucide-react';
 import { SIZE_CHART } from '../data/products';
 import { PossensiorIcon } from './Logos';
-import { extractDominantColorsFromImage, ExtractedColor } from '../utils/colorExtractor';
 
 interface ProductDetailModalProps {
   product: Product | null;
@@ -11,6 +10,53 @@ interface ProductDetailModalProps {
   onClose: () => void;
   onAddToCart: (product: Product, size: ProductSize, color: string, quantity: number) => void;
   onBuyNow: (product: Product, size: ProductSize, color: string, quantity: number) => void;
+}
+
+// Clean deduplication strictly using the colors saved on the product
+function deduplicateColors(
+  colors: { name: string; hex: string }[] = []
+): { name: string; hex: string }[] {
+  const seen = new Set<string>();
+  const unique: { name: string; hex: string }[] = [];
+
+  for (const c of colors) {
+    if (!c || !c.name) continue;
+    const nameTrimmed = c.name.trim();
+    if (!nameTrimmed) continue;
+    const key = nameTrimmed.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push({
+        name: nameTrimmed,
+        hex: c.hex && c.hex.trim() ? c.hex.trim() : '#18181B',
+      });
+    }
+  }
+
+  return unique.length > 0 ? unique : [{ name: 'Standard', hex: '#18181B' }];
+}
+
+function getProductSizeChart(
+  product: Product
+): { size: string; chest: string; length: string; shoulder: string; sleeve: string }[] {
+  if (product.customSizeChart && product.customSizeChart.length > 0) {
+    return product.customSizeChart;
+  }
+  if (product.sizes && product.sizes.length > 0) {
+    return product.sizes.map((sz) => {
+      const match = SIZE_CHART.find((row) => row.size.toUpperCase() === sz.toUpperCase());
+      return (
+        match || {
+          size: sz,
+          chest: '57 cm',
+          length: '71 cm',
+          shoulder: '55 cm',
+          sleeve: '23 cm',
+        }
+      );
+    });
+  }
+  return SIZE_CHART;
 }
 
 export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
@@ -21,45 +67,40 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   onBuyNow,
 }) => {
   const [activeImage, setActiveImage] = useState(product?.image || '');
-  const [selectedSize, setSelectedSize] = useState<ProductSize>(product?.sizes[0] || 'L');
-  const [availableColors, setAvailableColors] = useState<{ name: string; hex: string }[]>(product?.colors || []);
-  const [selectedColor, setSelectedColor] = useState(product?.colors[0]?.name || 'Standard');
+  const [availableColors, setAvailableColors] = useState<{ name: string; hex: string }[]>([]);
+  const [selectedColor, setSelectedColor] = useState('Standard');
+  const [selectedSize, setSelectedSize] = useState<ProductSize>('L');
   const [quantity, setQuantity] = useState(1);
   const [showSizeGuide, setShowSizeGuide] = useState(false);
   const [imageError, setImageError] = useState(false);
 
-  // Automatic Dominant Color Extraction from Product Main Image
+  // Synchronize strictly with the product's saved data — NO auto-extracted image colors
   useEffect(() => {
     if (!product) return;
     setActiveImage(product.image);
-    setSelectedSize(product.sizes[0] || 'L');
     setImageError(false);
 
-    let isMounted = true;
-    extractDominantColorsFromImage(product.image, product.colors).then((extracted) => {
-      if (isMounted && extracted && extracted.length > 0) {
-        // Merge extracted dominant colors with existing predefined colors
-        const combined = [...product.colors];
-        extracted.forEach((ext) => {
-          if (!combined.some((c) => c.hex.toLowerCase() === ext.hex.toLowerCase())) {
-            combined.push(ext);
-          }
-        });
-        setAvailableColors(combined);
-        if (!combined.some((c) => c.name === selectedColor)) {
-          setSelectedColor(combined[0].name);
-        }
-      }
-    });
+    // 1. Colors strictly from product.colors without duplicates or artificial image analysis
+    const uniqueColors = deduplicateColors(product.colors);
+    setAvailableColors(uniqueColors);
+    setSelectedColor(uniqueColors[0]?.name || 'Standard');
 
-    return () => {
-      isMounted = false;
-    };
+    // 2. Sizes strictly from product's custom size chart or defined sizes
+    const activeChart = getProductSizeChart(product);
+    const sizes = activeChart.map((r) => r.size);
+    setSelectedSize(sizes[0] || 'L');
   }, [product]);
 
-  if (!isOpen || !product) return null;
+  const activeSizeChart = React.useMemo(() => {
+    if (!product) return [];
+    return getProductSizeChart(product);
+  }, [product]);
 
-  const activeSizeChart = product.customSizeChart || SIZE_CHART;
+  const availableSizes = React.useMemo(() => {
+    return activeSizeChart.map((r) => r.size);
+  }, [activeSizeChart]);
+
+  if (!isOpen || !product) return null;
 
   const formatRupiah = (num: number) => {
     return new Intl.NumberFormat('id-ID', {
@@ -77,7 +118,15 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     onBuyNow(product, selectedSize, selectedColor, quantity);
   };
 
-  const allImages = [product.image, ...(product.additionalImages || [])];
+  const allImages = [product.image, ...(product.additionalImages || [])].filter(Boolean);
+
+  const handleColorSelect = (colorName: string, colorIndex: number) => {
+    setSelectedColor(colorName);
+    if (allImages[colorIndex]) {
+      setActiveImage(allImages[colorIndex]);
+      setImageError(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200">
@@ -170,28 +219,33 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               {product.description}
             </p>
 
-            {/* Automatic Dominant Color Extraction Swatches */}
+            {/* Pilihan Warna Resmi dari Owner Control — 1 swatch per warna unik */}
             <div className="mt-5">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                   <Palette className="w-3.5 h-3.5 text-[#365E52]" />
-                  <span>Pilihan Warna: <span className="font-normal text-slate-500">{selectedColor}</span></span>
+                  <span>
+                    Pilihan Warna: <strong className="text-[#365E52] font-semibold">{selectedColor}</strong>
+                  </span>
                 </span>
-                <span className="text-[10px] text-slate-400">Warna dominan gambar</span>
+                <span className="text-[10px] text-slate-400 font-medium">
+                  {availableColors.length} varian tersedia
+                </span>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
-                {availableColors.map((color) => (
+                {availableColors.map((color, idx) => (
                   <button
-                    key={color.name + color.hex}
-                    onClick={() => setSelectedColor(color.name)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all cursor-pointer ${
+                    key={`${color.name}-${color.hex}-${idx}`}
+                    type="button"
+                    onClick={() => handleColorSelect(color.name, idx)}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-medium transition-all cursor-pointer ${
                       selectedColor === color.name
-                        ? 'border-[#365E52] bg-[#365E52]/10 text-[#365E52] font-semibold ring-1 ring-[#365E52]'
-                        : 'border-slate-200 text-slate-600 hover:border-slate-300'
+                        ? 'border-[#365E52] bg-[#365E52]/10 text-[#365E52] font-bold ring-1 ring-[#365E52]'
+                        : 'border-slate-200 text-slate-600 hover:border-slate-300 bg-white'
                     }`}
                   >
                     <span
-                      className="w-3 h-3 rounded-full border border-black/10 shrink-0"
+                      className="w-3.5 h-3.5 rounded-full border border-black/15 shadow-2xs shrink-0 inline-block"
                       style={{ backgroundColor: color.hex }}
                     />
                     <span>{color.name}</span>
@@ -214,7 +268,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 </button>
               </div>
 
-              {/* Size guide interactive drawer */}
+              {/* Size guide interactive table: displays only sizes saved on this product */}
               {showSizeGuide && (
                 <div className="mb-3 p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs">
                   <p className="font-bold text-slate-700 mb-1.5">Tabel Ukuran (Centimeter):</p>
@@ -248,13 +302,14 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 </div>
               )}
 
-              {/* Size buttons */}
-              <div className="grid grid-cols-4 gap-2">
-                {product.sizes.map((size) => (
+              {/* Size buttons: dynamically rendered from activeSizeChart */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {availableSizes.map((size) => (
                   <button
                     key={size}
+                    type="button"
                     onClick={() => setSelectedSize(size)}
-                    className={`py-2 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                    className={`min-w-12 py-2 px-3.5 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
                       selectedSize === size
                         ? 'border-[#365E52] bg-[#365E52] text-white shadow-xs'
                         : 'border-slate-200 text-slate-700 hover:border-slate-300 bg-white'
@@ -271,6 +326,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               <span className="text-xs font-bold text-slate-700">Jumlah Beli</span>
               <div className="flex items-center border border-slate-200 rounded-lg overflow-hidden bg-white">
                 <button
+                  type="button"
                   onClick={() => setQuantity(Math.max(1, quantity - 1))}
                   className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 font-bold text-sm cursor-pointer"
                 >
@@ -280,6 +336,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                   {quantity}
                 </span>
                 <button
+                  type="button"
                   onClick={() => setQuantity(Math.min(product.stockCount, quantity + 1))}
                   className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 font-bold text-sm cursor-pointer"
                 >
@@ -293,6 +350,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
           <div className="mt-6 pt-5 border-t border-slate-100 space-y-2.5">
             <div className="grid grid-cols-2 gap-2.5">
               <button
+                type="button"
                 onClick={handleAdd}
                 className="py-3 px-4 bg-white border border-[#365E52] text-[#365E52] hover:bg-[#365E52]/5 font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
               >
@@ -301,6 +359,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               </button>
 
               <button
+                type="button"
                 onClick={handleBuy}
                 className="py-3 px-4 bg-[#365E52] hover:bg-[#2A4B41] text-white font-bold text-xs rounded-xl shadow-md transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
               >

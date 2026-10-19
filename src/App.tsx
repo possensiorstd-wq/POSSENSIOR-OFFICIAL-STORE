@@ -20,6 +20,7 @@ import {
   fetchProductsFromDatabase,
   saveProductToDatabase,
   deleteProductFromDatabase,
+  deleteOrderFromDatabase,
   migrateDefaultProductsToDatabase,
   isSupabaseConfigured,
 } from './lib/supabase';
@@ -233,12 +234,34 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Owner Operations (Synchronized with Supabase public.possensior_products)
+  // Owner Operations (Synchronized with Supabase and localStorage)
   const handleUpdateOrder = (updatedOrder: Order) => {
     setOrders((prev) =>
       prev.map((o) => (o.id === updatedOrder.id ? updatedOrder : o))
     );
     showToast(`Pesanan ${updatedOrder.invoiceNumber} diperbarui`);
+  };
+
+  const handleDeleteOrder = async (orderId: string): Promise<boolean> => {
+    try {
+      if (isSupabaseConfigured) {
+        await deleteOrderFromDatabase(orderId);
+      }
+      setOrders((prev) => {
+        const updated = prev.filter((o) => o.id !== orderId);
+        try {
+          localStorage.setItem('possensior_orders', JSON.stringify(updated));
+        } catch (e) {
+          console.error('LocalStorage write error', e);
+        }
+        return updated;
+      });
+      showToast('Pesanan berhasil dihapus');
+      return true;
+    } catch (err: any) {
+      alert(`Gagal menghapus pesanan: ${err?.message || 'Error tidak diketahui'}`);
+      return false;
+    }
   };
 
   const handleAddProduct = async (newProduct: Product): Promise<boolean> => {
@@ -650,6 +673,7 @@ export default function App() {
           onClose={() => setIsOwnerOpen(false)}
           orders={orders}
           onUpdateOrder={handleUpdateOrder}
+          onDeleteOrder={handleDeleteOrder}
           products={products}
           onAddProduct={handleAddProduct}
           onUpdateProduct={handleUpdateProduct}
