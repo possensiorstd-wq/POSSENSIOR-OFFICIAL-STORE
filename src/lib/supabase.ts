@@ -1,10 +1,22 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { Product } from '../types/store';
 
 /**
  * Exact name of the pre-created Supabase Storage Bucket.
  * Matched strictly to user configuration: "POSSENSIOR MEDIA"
  */
 export const STORAGE_BUCKET_NAME = 'POSSENSIOR MEDIA';
+
+/**
+ * Verified Owner Supabase Auth UID.
+ * Only this user has administrative write access via RLS.
+ */
+export const OWNER_UID = 'c03c6c3a-a534-41d5-bb57-85e335f4135b';
+
+/**
+ * Database table name for product catalog.
+ */
+export const PRODUCTS_TABLE = 'possensior_products';
 
 /**
  * Normalizes user-supplied Supabase Project URL.
@@ -55,6 +67,170 @@ export const supabase: SupabaseClient = createClient(
     },
   }
 );
+
+/**
+ * Helper to convert Base64 Data URL to a native binary Blob for upload.
+ */
+export function dataUrlToBlob(dataUrl: string): Blob {
+  const parts = dataUrl.split(',');
+  const mimeMatch = parts[0].match(/:(.*?);/);
+  const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+  const binary = atob(parts[1]);
+  const array = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    array[i] = binary.charCodeAt(i);
+  }
+  return new Blob([array], { type: mime });
+}
+
+/**
+ * Fetch products from the Supabase public.possensior_products table.
+ * Returns null if not configured or on network/query failure.
+ */
+export async function fetchProductsFromDatabase(): Promise<{
+  products: Product[] | null;
+  count: number;
+  error: string | null;
+}> {
+  if (!isSupabaseConfigured) {
+    return {
+      products: null,
+      count: 0,
+      error: 'Supabase belum terkonfigurasi pada environment.',
+    };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from(PRODUCTS_TABLE)
+      .select('id, product, updated_at')
+      .order('updated_at', { ascending: false });
+
+    if (error) {
+      return { products: null, count: 0, error: error.message };
+    }
+
+    if (!data) {
+      return { products: [], count: 0, error: null };
+    }
+
+    const parsed: Product[] = data
+      .map((row: any) => {
+        if (!row.product) return null;
+        const item =
+          typeof row.product === 'string'
+            ? JSON.parse(row.product)
+            : row.product;
+        return {
+          ...item,
+          id: row.id || item.id,
+        };
+      })
+      .filter(Boolean) as Product[];
+
+    return { products: parsed, count: parsed.length, error: null };
+  } catch (err: any) {
+    return {
+      products: null,
+      count: 0,
+      error: err?.message || 'Gagal memuat produk dari database.',
+    };
+  }
+}
+
+/**
+ * Upsert a single product to public.possensior_products.
+ * Column 'id' matches product.id, and column 'product' holds the full Product JSON.
+ */
+export async function saveProductToDatabase(
+  product: Product
+): Promise<{ error: string | null }> {
+  if (!isSupabaseConfigured) {
+    return { error: 'Supabase belum dikonfigurasi.' };
+  }
+
+  try {
+    const { error } = await supabase.from(PRODUCTS_TABLE).upsert(
+      {
+        id: product.id,
+        product: product,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'id' }
+    );
+
+    if (error) {
+      return { error: error.message };
+    }
+    return { error: null };
+  } catch (err: any) {
+    return {
+      error: err?.message || 'Gagal menyimpan produk ke database Supabase.',
+    };
+  }
+}
+
+/**
+ * Deletes a product from public.possensior_products by id.
+ */
+export async function deleteProductFromDatabase(
+  productId: string
+): Promise<{ error: string | null }> {
+  if (!isSupabaseConfigured) {
+    return { error: 'Supabase belum dikonfigurasi.' };
+  }
+
+  try {
+    const { error } = await supabase
+      .from(PRODUCTS_TABLE)
+      .delete()
+      .eq('id', productId);
+
+    if (error) {
+      return { error: error.message };
+    }
+    return { error: null };
+  } catch (err: any) {
+    return {
+      error: err?.message || 'Gagal menghapus produk dari database Supabase.',
+    };
+  }
+}
+
+/**
+ * Explicit migration of default products into the database.
+ * Only called on direct user request via Owner Control.
+ */
+export async function migrateDefaultProductsToDatabase(
+  defaultProducts: Product[]
+): Promise<{ count: number; error: string | null }> {
+  if (!isSupabaseConfigured) {
+    return { count: 0, error: 'Supabase belum dikonfigurasi.' };
+  }
+
+  try {
+    const rows = defaultProducts.map((p) => ({
+      id: p.id,
+      product: p,
+      updated_at: new Date().toISOString(),
+    }));
+
+    const { error } = await supabase
+      .from(PRODUCTS_TABLE)
+      .upsert(rows, { onConflict: 'id' });
+
+    if (error) {
+      return { count: 0, error: error.message };
+    }
+
+    return { count: rows.length, error: null };
+  } catch (err: any) {
+    return {
+      count: 0,
+      error: err?.message || 'Gagal memigrasikan produk default ke database.',
+    };
+  }
+}
 
 /**
  * Helper function to explicitly test the Supabase connection.

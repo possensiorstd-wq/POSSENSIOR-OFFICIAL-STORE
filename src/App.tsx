@@ -16,6 +16,13 @@ import { OwnerControl } from './components/OwnerControl';
 import { Footer } from './components/Footer';
 import { Search, Check } from 'lucide-react';
 import { PossensiorIcon } from './components/Logos';
+import {
+  fetchProductsFromDatabase,
+  saveProductToDatabase,
+  deleteProductFromDatabase,
+  migrateDefaultProductsToDatabase,
+  isSupabaseConfigured,
+} from './lib/supabase';
 
 export default function App() {
   // Navigation View: 'landing' | 'home' | 'checkout' | 'tracking'
@@ -30,7 +37,7 @@ export default function App() {
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isOwnerOpen, setIsOwnerOpen] = useState(false);
 
-  // Products State (Persisted in localStorage so Owner edits remain)
+  // Products State (Persisted in localStorage with online Supabase synchronization)
   const [products, setProducts] = useState<Product[]>(() => {
     try {
       const saved = localStorage.getItem('possensior_products');
@@ -39,6 +46,9 @@ export default function App() {
       return PRODUCTS;
     }
   });
+
+  // Track initial Supabase catalog fetch completion to prevent race conditions
+  const [isDbLoaded, setIsDbLoaded] = useState(false);
 
   // Cart State (Persisted in localStorage)
   const [cartItems, setCartItems] = useState<CartItem[]>(() => {
@@ -69,13 +79,49 @@ export default function App() {
   // Toast Notification State
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Fetch products from public.possensior_products on startup
   useEffect(() => {
+    let isMounted = true;
+
+    async function loadCatalog() {
+      try {
+        const { products: dbProducts, error } = await fetchProductsFromDatabase();
+        if (!isMounted) return;
+
+        if (!error && dbProducts && dbProducts.length > 0) {
+          setProducts(dbProducts);
+          try {
+            localStorage.setItem('possensior_products', JSON.stringify(dbProducts));
+          } catch (e) {
+            console.error('Failed to update localStorage with DB products', e);
+          }
+        } else if (!error && dbProducts && dbProducts.length === 0) {
+          // Database is readable but empty: keep safe fallback without overwriting DB automatically
+          console.log('Database Supabase kosong. Menggunakan fallback lokal aman.');
+        }
+      } catch (err) {
+        console.error('Failed to load products from database', err);
+      } finally {
+        if (isMounted) setIsDbLoaded(true);
+      }
+    }
+
+    loadCatalog();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Sync products to localStorage only after initial DB fetch completes to avoid race condition
+  useEffect(() => {
+    if (!isDbLoaded) return;
     try {
       localStorage.setItem('possensior_products', JSON.stringify(products));
     } catch (e) {
       console.error('Failed to save products to localStorage', e);
     }
-  }, [products]);
+  }, [products, isDbLoaded]);
 
   useEffect(() => {
     try {
@@ -187,7 +233,7 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Owner Operations
+  // Owner Operations (Synchronized with Supabase public.possensior_products)
   const handleUpdateOrder = (updatedOrder: Order) => {
     setOrders((prev) =>
       prev.map((o) => (o.id === updatedOrder.id ? updatedOrder : o))
@@ -195,21 +241,74 @@ export default function App() {
     showToast(`Pesanan ${updatedOrder.invoiceNumber} diperbarui`);
   };
 
-  const handleAddProduct = (newProduct: Product) => {
+  const handleAddProduct = async (newProduct: Product): Promise<boolean> => {
+    const { error } = await saveProductToDatabase(newProduct);
+    if (error) {
+      alert(`Gagal menyimpan produk ke database Supabase: ${error}`);
+      return false;
+    }
     setProducts((prev) => [newProduct, ...prev]);
-    showToast(`Produk "${newProduct.name}" ditambahkan`);
+    showToast(`Produk "${newProduct.name}" berhasil disimpan ke database`);
+    return true;
   };
 
-  const handleUpdateProduct = (updatedProduct: Product) => {
+  const handleUpdateProduct = async (updatedProduct: Product): Promise<boolean> => {
+    const { error } = await saveProductToDatabase(updatedProduct);
+    if (error) {
+      alert(`Gagal memperbarui produk di database Supabase: ${error}`);
+      return false;
+    }
     setProducts((prev) =>
       prev.map((p) => (p.id === updatedProduct.id ? updatedProduct : p))
     );
-    showToast(`Produk "${updatedProduct.name}" diperbarui`);
+    showToast(`Produk "${updatedProduct.name}" berhasil diperbarui di database`);
+    return true;
   };
 
-  const handleDeleteProduct = (productId: string) => {
+  const handleDeleteProduct = async (productId: string): Promise<boolean> => {
+    const { error } = await deleteProductFromDatabase(productId);
+    if (error) {
+      alert(`Gagal menghapus produk dari database Supabase: ${error}`);
+      return false;
+    }
     setProducts((prev) => prev.filter((p) => p.id !== productId));
-    showToast('Produk dihapus dari katalog');
+    showToast('Produk berhasil dihapus dari database');
+    return true;
+  };
+
+  const handleMigrateDefaultProducts = async (): Promise<{
+    success: boolean;
+    count?: number;
+    message: string;
+  }> => {
+    const { count, error } = await migrateDefaultProductsToDatabase(PRODUCTS);
+    if (error) {
+      return { success: false, message: `Migrasi gagal: ${error}` };
+    }
+    const { products: refreshed } = await fetchProductsFromDatabase();
+    if (refreshed && refreshed.length > 0) {
+      setProducts(refreshed);
+    }
+    showToast(`${count} produk awal berhasil dimigrasikan ke database`);
+    return {
+      success: true,
+      count,
+      message: `Berhasil memigrasikan ${count} produk ke database Supabase.`,
+    };
+  };
+
+  const handleRefreshProducts = async () => {
+    const { products: refreshed, error } = await fetchProductsFromDatabase();
+    if (error) {
+      alert(`Gagal memuat produk dari database: ${error}`);
+      return;
+    }
+    if (refreshed && refreshed.length > 0) {
+      setProducts(refreshed);
+      showToast('Katalog berhasil disegarkan dari database Supabase');
+    } else {
+      showToast('Katalog database kosong atau belum diisi');
+    }
   };
 
   // Filter and sort products
@@ -555,6 +654,9 @@ export default function App() {
           onAddProduct={handleAddProduct}
           onUpdateProduct={handleUpdateProduct}
           onDeleteProduct={handleDeleteProduct}
+          onMigrateDefaultProducts={handleMigrateDefaultProducts}
+          onRefreshProducts={handleRefreshProducts}
+          isDbConfigured={isSupabaseConfigured}
         />
       )}
     </div>

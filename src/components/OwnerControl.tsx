@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Product, Order, ProductSize } from '../types/store';
 import { SIZE_CHART } from '../data/products';
 import { 
@@ -17,11 +17,23 @@ import {
   Palette,
   Ruler,
   Layers,
-  ArrowLeft
+  ArrowLeft,
+  LogOut,
+  RefreshCw,
+  Database,
+  ShieldCheck,
+  Loader2
 } from 'lucide-react';
 import { PossensiorWordmark } from './Logos';
 import { BatchReceiptPrintModal } from './BatchReceiptPrintModal';
 import { compressImageIfExceeds, extractDominantColorsFromImage } from '../utils/colorExtractor';
+import { 
+  supabase, 
+  OWNER_UID, 
+  uploadImageToSupabase, 
+  dataUrlToBlob, 
+  isSupabaseConfigured 
+} from '../lib/supabase';
 
 interface OwnerControlProps {
   isOpen: boolean;
@@ -29,9 +41,12 @@ interface OwnerControlProps {
   orders: Order[];
   onUpdateOrder: (updatedOrder: Order) => void;
   products: Product[];
-  onAddProduct: (newProduct: Product) => void;
-  onUpdateProduct: (updatedProduct: Product) => void;
-  onDeleteProduct: (productId: string) => void;
+  onAddProduct: (newProduct: Product) => Promise<boolean>;
+  onUpdateProduct: (updatedProduct: Product) => Promise<boolean>;
+  onDeleteProduct: (productId: string) => Promise<boolean>;
+  onMigrateDefaultProducts?: () => Promise<{ success: boolean; count?: number; message: string }>;
+  onRefreshProducts?: () => Promise<void>;
+  isDbConfigured?: boolean;
 }
 
 export const OwnerControl: React.FC<OwnerControlProps> = ({
@@ -43,11 +58,18 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
   onAddProduct,
   onUpdateProduct,
   onDeleteProduct,
+  onMigrateDefaultProducts,
+  onRefreshProducts,
+  isDbConfigured = isSupabaseConfigured,
 }) => {
   // Authentication State
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [authError, setAuthError] = useState(false);
+  const [authErrorMessage, setAuthErrorMessage] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [ownerEmail, setOwnerEmail] = useState('');
 
   // Dashboard State
   const [activeTab, setActiveTab] = useState<'orders' | 'catalog'>('orders');
@@ -61,6 +83,10 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isCreatingNew, setIsCreatingNew] = useState(false);
   const [formImageNotice, setFormImageNotice] = useState<string | null>(null);
+  const [isSavingProduct, setIsSavingProduct] = useState(false);
+  const [isMigrating, setIsMigrating] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
 
   // Form Fields for Product
   const [formName, setFormName] = useState('');
@@ -81,22 +107,105 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
   const [formSizes, setFormSizes] = useState<ProductSize[]>(['S', 'M', 'L', 'XL']);
   const [formSizeChart, setFormSizeChart] = useState(SIZE_CHART);
 
+  // Check active Supabase Auth session on mount and listen to changes
+  useEffect(() => {
+    let isMounted = true;
+
+    const verifySession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!isMounted) return;
+        if (session?.user && session.user.id === OWNER_UID) {
+          setIsAuthenticated(true);
+          setOwnerEmail(session.user.email || '');
+        } else if (session?.user) {
+          // Logged in user is not the designated owner UID
+          await supabase.auth.signOut();
+          setIsAuthenticated(false);
+          setOwnerEmail('');
+        }
+      } catch (err) {
+        console.error('Session verify error', err);
+      }
+    };
+
+    verifySession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!isMounted) return;
+      if (session?.user && session.user.id === OWNER_UID) {
+        setIsAuthenticated(true);
+        setOwnerEmail(session.user.email || '');
+      } else {
+        setIsAuthenticated(false);
+        setOwnerEmail('');
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
   if (!isOpen) return null;
 
-  // Login handler
-  const handleLogin = () => {
-    if (passwordInput === 'Adminpossen') {
-      setIsAuthenticated(true);
-      setAuthError(false);
-    } else {
+  // Supabase Auth Login handler
+  const handleLogin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!emailInput.trim() || !passwordInput) {
+      setAuthErrorMessage('Silakan isi email dan password owner.');
       setAuthError(true);
+      return;
+    }
+
+    setIsLoggingIn(true);
+    setAuthError(false);
+    setAuthErrorMessage('');
+
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: emailInput.trim(),
+        password: passwordInput,
+      });
+
+      if (error) {
+        setAuthErrorMessage(error.message);
+        setAuthError(true);
+        setIsAuthenticated(false);
+        return;
+      }
+
+      if (data.user?.id !== OWNER_UID) {
+        await supabase.auth.signOut();
+        setAuthErrorMessage('Akses ditolak: Akun ini bukan pemilik terdaftar POSSENSIOR (UID tidak cocok).');
+        setAuthError(true);
+        setIsAuthenticated(false);
+        return;
+      }
+
+      setIsAuthenticated(true);
+      setOwnerEmail(data.user.email || emailInput.trim());
+      setPasswordInput('');
+      setAuthError(false);
+    } catch (err: any) {
+      setAuthErrorMessage(err?.message || 'Gagal menghubungi server autentikasi.');
+      setAuthError(true);
+      setIsAuthenticated(false);
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      handleLogin();
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error('Logout error', err);
     }
+    setIsAuthenticated(false);
+    setOwnerEmail('');
+    setPasswordInput('');
   };
 
   const formatRupiah = (num: number) => {
@@ -150,7 +259,8 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
     alert(`Nomor resi ${resiValue.trim()} berhasil disimpan dan status pesanan diperbarui menjadi "dikirim".`);
   };
 
-  // Image Upload with Automatic Compression (>5MB) & Dominant Color Extraction
+  // Image Upload with Automatic Compression (>5MB), Dominant Color Extraction,
+  // and direct online upload to Supabase Storage bucket "POSSENSIOR MEDIA" in "catalog/"
   const handleImageFileChange = async (
     e: React.ChangeEvent<HTMLInputElement>,
     isDetail: boolean = false
@@ -164,27 +274,44 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
       const result = await compressImageIfExceeds(file, 5 * 1024 * 1024);
       if (result.wasCompressed) {
         setFormImageNotice(
-          `Ukuran gambar ${(result.originalSize / 1024 / 1024).toFixed(1)} MB otomatis dikompres menjadi ${(result.compressedSize / 1024 / 1024).toFixed(1)} MB (di bawah 5MB).`
+          `Ukuran gambar ${(result.originalSize / 1024 / 1024).toFixed(1)} MB dikompres menjadi ${(result.compressedSize / 1024 / 1024).toFixed(1)} MB. Mengunggah ke bucket "POSSENSIOR MEDIA"...`
         );
       } else {
-        setFormImageNotice(`Gambar berhasil dimuat (${(result.originalSize / 1024 / 1024).toFixed(1)} MB).`);
+        setFormImageNotice(
+          `Gambar diproses (${(result.originalSize / 1024 / 1024).toFixed(1)} MB). Mengunggah ke bucket "POSSENSIOR MEDIA"...`
+        );
       }
 
-      if (isDetail) {
-        setFormAdditionalImages((prev) => [...prev, result.dataUrl]);
-      } else {
-        setFormImage(result.dataUrl);
-
-        // Extract Dominant Colors Automatically
+      // Extract Dominant Colors Automatically if main image
+      if (!isDetail) {
         const extracted = await extractDominantColorsFromImage(result.dataUrl);
         if (extracted && extracted.length > 0) {
           setFormColors(extracted);
-          setFormImageNotice((prev) => `${prev} · Warna dominan diekstrak otomatis.`);
         }
       }
-    } catch (err) {
-      console.error('Image compression error', err);
-      setFormImageNotice('Gagal memproses gambar.');
+
+      // Convert to binary Blob and upload to bucket "POSSENSIOR MEDIA" inside "catalog/" folder
+      const blob = dataUrlToBlob(result.dataUrl);
+      const { url, error } = await uploadImageToSupabase(blob, 'catalog');
+
+      if (error || !url) {
+        setFormImageNotice(`Gagal mengunggah gambar ke storage: ${error}`);
+        alert(`Gagal mengunggah gambar ke bucket "POSSENSIOR MEDIA": ${error}\nPastikan Anda login sebagai pemilik dan policy storage telah aktif.`);
+        return;
+      }
+
+      if (isDetail) {
+        setFormAdditionalImages((prev) => [...prev, url]);
+        setFormImageNotice('Gambar detail berhasil diunggah ke storage online (URL disimpan).');
+      } else {
+        setFormImage(url);
+        setFormImageNotice('Gambar utama berhasil diunggah ke storage online (URL disimpan).');
+      }
+    } catch (err: any) {
+      console.error('Image upload error', err);
+      setFormImageNotice(`Gagal memproses gambar: ${err?.message || 'Error'}`);
+    } finally {
+      e.target.value = '';
     }
   };
 
@@ -235,50 +362,92 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
     setFormImageNotice(null);
   };
 
-  // Save Product Form
-  const handleSaveProductForm = (e: React.FormEvent) => {
+  // Save Product Form: handles image upload validation, awaits database confirmation before closing
+  const handleSaveProductForm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName.trim() || !formPrice) {
       alert('Nama produk dan harga wajib diisi.');
       return;
     }
 
-    const payload: Product = {
-      id: editingProduct ? editingProduct.id : `poss-${Date.now()}`,
-      name: formName.trim(),
-      subtitle: formSubtitle.trim() || 'Signature Boxy Fit Apparel',
-      slug: formName.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-      category: formCategory,
-      price: Number(formPrice),
-      originalPrice: formOriginalPrice ? Number(formOriginalPrice) : undefined,
-      description: formDescription.trim() || 'Koleksi apparel boxy fit Possensior dengan jahitan presisi.',
-      material: formMaterial.trim(),
-      fit: formFit.trim(),
-      sizes: formSizes,
-      colors: formColors,
-      image: formImage || products[0]?.image || '',
-      additionalImages: formAdditionalImages,
-      customSizeChart: formSizeChart,
-      inStock: formStock > 0,
-      stockCount: Number(formStock),
-      tag: formTag.trim() || undefined,
-      features: [
-        'Rib leher tebal anti-melar',
-        'Jahitan rantai standar internasional',
-        'Bahan combed heavyweight berstruktur',
-      ],
-    };
+    setIsSavingProduct(true);
+    setFormImageNotice('Memvalidasi gambar dan data produk...');
 
-    if (editingProduct) {
-      onUpdateProduct(payload);
-      alert(`Produk "${payload.name}" berhasil diperbarui.`);
-    } else {
-      onAddProduct(payload);
-      alert(`Produk "${payload.name}" berhasil ditambahkan ke katalog.`);
+    try {
+      let finalMainImage = formImage || products[0]?.image || '';
+      let finalAdditionalImages = [...formAdditionalImages];
+
+      // Ensure no raw dataUrl is saved; upload if needed
+      if (finalMainImage.startsWith('data:')) {
+        setFormImageNotice('Mengunggah gambar utama ke Supabase Storage (POSSENSIOR MEDIA)...');
+        const blob = dataUrlToBlob(finalMainImage);
+        const { url, error } = await uploadImageToSupabase(blob, 'catalog');
+        if (error || !url) {
+          alert(`Penyimpanan produk dibatalkan: Gagal mengunggah gambar utama (${error}).`);
+          setIsSavingProduct(false);
+          return;
+        }
+        finalMainImage = url;
+      }
+
+      for (let i = 0; i < finalAdditionalImages.length; i++) {
+        if (finalAdditionalImages[i].startsWith('data:')) {
+          setFormImageNotice(`Mengunggah gambar detail ${i + 1} ke Supabase Storage (POSSENSIOR MEDIA)...`);
+          const blob = dataUrlToBlob(finalAdditionalImages[i]);
+          const { url, error } = await uploadImageToSupabase(blob, 'catalog');
+          if (error || !url) {
+            alert(`Penyimpanan produk dibatalkan: Gagal mengunggah gambar detail ${i + 1} (${error}).`);
+            setIsSavingProduct(false);
+            return;
+          }
+          finalAdditionalImages[i] = url;
+        }
+      }
+
+      const payload: Product = {
+        id: editingProduct ? editingProduct.id : `poss-${Date.now()}`,
+        name: formName.trim(),
+        subtitle: formSubtitle.trim() || 'Signature Boxy Fit Apparel',
+        slug: formName.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+        category: formCategory,
+        price: Number(formPrice),
+        originalPrice: formOriginalPrice ? Number(formOriginalPrice) : undefined,
+        description: formDescription.trim() || 'Koleksi apparel boxy fit Possensior dengan jahitan presisi.',
+        material: formMaterial.trim(),
+        fit: formFit.trim(),
+        sizes: formSizes,
+        colors: formColors,
+        image: finalMainImage,
+        additionalImages: finalAdditionalImages,
+        customSizeChart: formSizeChart,
+        inStock: formStock > 0,
+        stockCount: Number(formStock),
+        tag: formTag.trim() || undefined,
+        features: [
+          'Rib leher tebal anti-melar',
+          'Jahitan rantai standar internasional',
+          'Bahan combed heavyweight berstruktur',
+        ],
+      };
+
+      if (editingProduct) {
+        const success = await onUpdateProduct(payload);
+        if (success) {
+          setEditingProduct(null);
+          setIsCreatingNew(false);
+        }
+      } else {
+        const success = await onAddProduct(payload);
+        if (success) {
+          setEditingProduct(null);
+          setIsCreatingNew(false);
+        }
+      }
+    } catch (err: any) {
+      alert(`Gagal menyimpan produk: ${err?.message || 'Error tidak diketahui'}`);
+    } finally {
+      setIsSavingProduct(false);
     }
-
-    setEditingProduct(null);
-    setIsCreatingNew(false);
   };
 
   // Color Variant Helpers
@@ -339,16 +508,36 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-            aria-label="Tutup panel owner"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2 sm:gap-3">
+            {isAuthenticated && (
+              <>
+                <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 bg-emerald-950/70 border border-emerald-500/30 rounded-lg text-emerald-300 text-[11px] font-medium">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="truncate max-w-[150px]">{ownerEmail || 'Owner Terverifikasi'}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="px-3 py-1.5 text-xs text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+                  title="Keluar dari sesi Owner"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Logout</span>
+                </button>
+              </>
+            )}
+
+            <button
+              onClick={onClose}
+              className="p-1.5 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
+              aria-label="Tutup panel owner"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
-        {/* Password Screen if Not Authenticated */}
+        {/* Supabase Authentication Screen if Not Authenticated */}
         {!isAuthenticated ? (
           <div className="p-8 sm:p-12 text-center max-w-md mx-auto my-auto w-full">
             <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4 text-[#365E52]">
@@ -356,43 +545,73 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
             </div>
             <h3 className="text-xl font-extrabold text-[#1E2927]">Keamanan Akses Owner</h3>
             <p className="text-xs text-slate-500 mt-1 mb-6">
-              Silakan masukkan password otorisasi untuk mengakses kontrol pesanan dan katalog.
+              Silakan masuk menggunakan akun Supabase Auth pemilik untuk mengelola pesanan, katalog, dan media penyimpanan.
             </p>
 
-            <div className="space-y-3">
-              <input
-                type="password"
-                autoFocus
-                value={passwordInput}
-                onChange={(e) => {
-                  setPasswordInput(e.target.value);
-                  setAuthError(false);
-                }}
-                onKeyDown={handleKeyDown}
-                placeholder="Masukkan password owner..."
-                className="w-full p-3 border border-slate-300 rounded-xl text-center text-sm font-mono tracking-widest focus:outline-none focus:border-[#365E52]"
-              />
+            <form onSubmit={handleLogin} className="space-y-3.5 text-left">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Email Akun Pemilik
+                </label>
+                <input
+                  type="email"
+                  autoFocus
+                  required
+                  value={emailInput}
+                  onChange={(e) => {
+                    setEmailInput(e.target.value);
+                    setAuthError(false);
+                  }}
+                  placeholder="owner@possensior.com"
+                  className="w-full p-3 border border-slate-300 rounded-xl text-sm focus:outline-none focus:border-[#365E52]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Password
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={passwordInput}
+                  onChange={(e) => {
+                    setPasswordInput(e.target.value);
+                    setAuthError(false);
+                  }}
+                  placeholder="••••••••••••"
+                  className="w-full p-3 border border-slate-300 rounded-xl text-sm font-mono tracking-widest focus:outline-none focus:border-[#365E52]"
+                />
+              </div>
 
               {authError && (
-                <div className="text-xs text-red-600 font-semibold flex items-center justify-center gap-1">
-                  <AlertCircle className="w-3.5 h-3.5" />
-                  <span>Password salah. Coba periksa kembali.</span>
+                <div className="text-xs text-red-600 font-semibold flex items-center gap-1.5 p-2.5 bg-red-50 border border-red-200 rounded-xl">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{authErrorMessage || 'Email atau password salah.'}</span>
                 </div>
               )}
 
               <button
-                onClick={handleLogin}
-                className="w-full py-3 bg-[#365E52] hover:bg-[#2A4B41] text-white font-bold text-xs rounded-xl shadow-md transition-colors cursor-pointer"
+                type="submit"
+                disabled={isLoggingIn}
+                className="w-full py-3 bg-[#365E52] hover:bg-[#2A4B41] disabled:opacity-60 text-white font-bold text-xs rounded-xl shadow-md transition-colors cursor-pointer flex items-center justify-center gap-2"
               >
-                Masuk ke Dashboard Owner (Enter)
+                {isLoggingIn ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Memverifikasi Akun Owner...</span>
+                  </>
+                ) : (
+                  <span>Masuk ke Dashboard Owner</span>
+                )}
               </button>
-            </div>
+            </form>
           </div>
         ) : (
           /* Authenticated Dashboard */
           <div className="flex-1 flex flex-col overflow-hidden">
-            {/* Tab Navigation */}
-            <div className="px-6 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+            {/* Tab Navigation & Status Bar */}
+            <div className="px-6 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setActiveTab('orders')}
@@ -419,26 +638,50 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
                 </button>
               </div>
 
-              {activeTab === 'orders' && (
-                <button
-                  type="button"
-                  onClick={() => setShowBatchPrint(true)}
-                  className="px-3.5 py-2 bg-slate-900 hover:bg-black text-white text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Printer className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Cetak Semua Resi Sekaligus</span>
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {activeTab === 'orders' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowBatchPrint(true)}
+                    className="px-3.5 py-2 bg-slate-900 hover:bg-black text-white text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Printer className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Cetak Semua Resi Sekaligus</span>
+                  </button>
+                )}
 
-              {activeTab === 'catalog' && (
-                <button
-                  onClick={openCreateProduct}
-                  className="px-3.5 py-2 bg-[#365E52] hover:bg-[#2A4B41] text-white text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Tambah Produk Baru</span>
-                </button>
-              )}
+                {activeTab === 'catalog' && (
+                  <div className="flex items-center gap-2">
+                    {onRefreshProducts && (
+                      <button
+                        type="button"
+                        disabled={isRefreshing}
+                        onClick={async () => {
+                          setIsRefreshing(true);
+                          try {
+                            await onRefreshProducts();
+                          } finally {
+                            setIsRefreshing(false);
+                          }
+                        }}
+                        className="px-3 py-2 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        title="Perbarui data katalog langsung dari Supabase"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-[#365E52]' : ''}`} />
+                        <span className="hidden sm:inline">Segarkan Data</span>
+                      </button>
+                    )}
+
+                    <button
+                      onClick={openCreateProduct}
+                      className="px-3.5 py-2 bg-[#365E52] hover:bg-[#2A4B41] text-white text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Tambah Produk Baru</span>
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Content Area */}
@@ -500,67 +743,86 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
                               <select
                                 value={order.paymentStatus}
                                 onChange={(e) => handleStatusChange(order, e.target.value)}
-                                className="text-xs font-bold border border-slate-200 rounded-lg px-2.5 py-1.5 bg-slate-50 text-[#365E52] focus:outline-none cursor-pointer uppercase"
+                                className="text-xs font-bold p-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:border-[#365E52] cursor-pointer"
                               >
                                 <option value="menunggu_pembayaran">Menunggu Pembayaran</option>
                                 <option value="terverifikasi">Terverifikasi</option>
-                                <option value="diproses">Diproses Gudang</option>
-                                <option value="dikirim">Dikirim Kurir</option>
-                                <option value="selesai">Selesai</option>
+                                <option value="diproses">Diproses & Packing</option>
+                                <option value="dikirim">Dikirim ke Kurir</option>
+                                <option value="selesai">Selesai Diterima</option>
                               </select>
                             </div>
                           </div>
 
-                          {/* Items and Input Resi Section */}
-                          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 pt-3 text-xs">
-                            {/* Items (7 cols) */}
-                            <div className="md:col-span-7 space-y-1.5">
-                              <span className="font-bold text-slate-700 block">Daftar Produk:</span>
-                              {order.items.map((it) => (
-                                <div key={it.id} className="flex justify-between text-slate-600">
-                                  <span>
-                                    {it.product.name} ({it.selectedSize} · {it.selectedColor}) × {it.quantity}
-                                  </span>
-                                  <span className="font-mono font-medium">
-                                    {formatRupiah(it.product.price * it.quantity)}
-                                  </span>
-                                </div>
-                              ))}
-                              <div className="pt-1 text-[11px] text-slate-400">
-                                Kurir: {order.shipping.courier.toUpperCase()} · Total Tagihan:{' '}
-                                <strong className="text-[#365E52]">{formatRupiah(order.total)}</strong>
+                          {/* Items & Shipping row */}
+                          <div className="py-3 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                            <div>
+                              <span className="font-bold text-slate-500 uppercase tracking-wider text-[10px]">
+                                Item Pesanan:
+                              </span>
+                              <div className="mt-1 space-y-1">
+                                {order.items.map((it) => (
+                                  <div key={it.id} className="flex items-center justify-between">
+                                    <span>
+                                      {it.product.name} ({it.selectedSize} · {it.selectedColor}) × {it.quantity}
+                                    </span>
+                                    <span className="font-mono text-slate-600">
+                                      {formatRupiah(it.product.price * it.quantity)}
+                                    </span>
+                                  </div>
+                                ))}
                               </div>
                             </div>
 
-                            {/* Resi Input Form (5 cols) */}
-                            <div className="md:col-span-5 bg-slate-50 p-3 rounded-xl border border-slate-200/80">
-                              <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">
-                                Input Nomor Resi Kurir ({order.shipping.courier.toUpperCase()}):
-                              </label>
-                              <div className="flex gap-2">
-                                <input
-                                  type="text"
-                                  value={resiInputs[order.id] !== undefined ? resiInputs[order.id] : (order.courierResi || '')}
-                                  onChange={(e) =>
-                                    setResiInputs({ ...resiInputs, [order.id]: e.target.value })
-                                  }
-                                  placeholder="Contoh: 00418299104"
-                                  className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-mono font-semibold focus:outline-none focus:border-[#365E52]"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => handleSaveResi(order)}
-                                  className="px-3 py-1.5 bg-[#365E52] hover:bg-[#2A4B41] text-white font-bold rounded-lg text-xs transition-colors shrink-0 cursor-pointer"
-                                  title="Simpan resi dan ubah status ke 'dikirim'"
-                                >
-                                  Simpan
-                                </button>
+                            <div>
+                              <span className="font-bold text-slate-500 uppercase tracking-wider text-[10px]">
+                                Pengiriman & Total:
+                              </span>
+                              <p className="mt-1 text-slate-700">
+                                Kurir: <strong className="uppercase">{order.shipping.courier}</strong> · Alamat: {order.shipping.address}, {order.shipping.city}
+                              </p>
+                              <p className="font-bold text-sm text-[#365E52] mt-1 font-mono">
+                                Total: {formatRupiah(order.total)}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Input Nomor Resi Kurir (Aktif untuk update tracking pembeli) */}
+                          <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/70 p-3 rounded-xl mt-2">
+                            <div className="flex items-center gap-2">
+                              <Truck className="w-4 h-4 text-[#365E52] shrink-0" />
+                              <div className="text-xs">
+                                <span className="font-semibold text-slate-700">Resi Pengiriman Kurir:</span>
+                                {order.courierResi ? (
+                                  <span className="ml-2 font-mono font-bold text-[#1E2927] bg-white px-2 py-0.5 rounded border border-slate-200">
+                                    {order.courierResi}
+                                  </span>
+                                ) : (
+                                  <span className="ml-2 text-amber-600 font-medium">Belum ada nomor resi</span>
+                                )}
                               </div>
-                              {order.courierResi && (
-                                <span className="block text-[10px] text-emerald-700 font-mono mt-1 font-semibold">
-                                  ✓ Resi tersimpan: {order.courierResi}
-                                </span>
-                              )}
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                placeholder="Input resi kurir..."
+                                defaultValue={order.courierResi || ''}
+                                onChange={(e) =>
+                                  setResiInputs((prev) => ({
+                                    ...prev,
+                                    [order.id]: e.target.value,
+                                  }))
+                                }
+                                className="text-xs p-1.5 border border-slate-300 rounded-lg bg-white w-44 font-mono focus:outline-none focus:border-[#365E52]"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleSaveResi(order)}
+                                className="px-3 py-1.5 bg-[#365E52] hover:bg-[#2A4B41] text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                              >
+                                Simpan Resi
+                              </button>
                             </div>
                           </div>
                         </div>
@@ -573,30 +835,86 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
               {/* TAB 2: CATALOG MANAGEMENT */}
               {activeTab === 'catalog' && (
                 <div className="space-y-6">
+                  {/* Sync Status Banner & Optional Safe Migration Button */}
+                  <div className="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-emerald-600/10 flex items-center justify-center text-[#365E52] shrink-0">
+                        <Database className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-xs font-bold text-slate-800">Tersinkronisasi dengan Supabase Database</h4>
+                          <span className="px-2 py-0.5 bg-emerald-100 text-[#365E52] text-[10px] font-bold rounded-full">
+                            public.possensior_products
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-600">
+                          Setiap penambahan, pengeditan, atau penghapusan produk langsung tercatat di Supabase secara online.
+                        </p>
+                      </div>
+                    </div>
+
+                    {onMigrateDefaultProducts && (
+                      <button
+                        type="button"
+                        disabled={isMigrating}
+                        onClick={async () => {
+                          if (confirm('Apakah Anda ingin memigrasikan daftar produk awal ke database Supabase sekarang?')) {
+                            setIsMigrating(true);
+                            try {
+                              const res = await onMigrateDefaultProducts();
+                              alert(res.message);
+                            } finally {
+                              setIsMigrating(false);
+                            }
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-white border border-emerald-300 hover:bg-emerald-50 text-[#365E52] text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
+                      >
+                        {isMigrating ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Memigrasikan...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Database className="w-3.5 h-3.5" />
+                            <span>Migrasikan Produk Awal ke Database</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Product Cards Grid */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {products.map((product) => (
                       <div
                         key={product.id}
-                        className="bg-white border border-slate-200/90 rounded-2xl p-4 flex gap-4 items-center justify-between shadow-xs hover:border-[#365E52]/40 transition-colors"
+                        className="bg-white border border-slate-200 rounded-2xl p-4 flex gap-4 shadow-xs items-center hover:border-slate-300 transition-colors"
                       >
                         <img
                           src={product.image}
                           alt={product.name}
-                          className="w-20 h-20 rounded-xl object-cover bg-stone-100 border border-slate-200 shrink-0"
+                          className="w-20 h-24 object-cover rounded-xl bg-slate-100 shrink-0"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).src =
+                              'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&q=80&w=600';
+                          }}
                         />
 
                         <div className="flex-1 min-w-0">
-                          <span className="text-[10px] uppercase font-bold text-slate-400">
+                          <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
                             {product.category} · Stok: {product.stockCount} pcs
                           </span>
-                          <h4 className="text-sm font-bold text-[#1E2927] truncate mt-0.5">
-                            {product.name}
-                          </h4>
-                          <span className="text-xs font-mono font-bold text-[#365E52] block mt-0.5">
+                          <h4 className="font-bold text-sm text-[#1E2927] truncate mt-0.5">{product.name}</h4>
+                          <p className="text-xs text-slate-500 truncate">{product.subtitle}</p>
+                          <p className="text-sm font-mono font-bold text-[#365E52] mt-1">
                             {formatRupiah(product.price)}
-                          </span>
-                          <div className="flex items-center gap-1 mt-1 text-[11px] text-slate-500">
-                            <span>Varian:</span>
+                          </p>
+
+                          {/* Color indicators */}
+                          <div className="flex items-center gap-1 mt-2">
                             {product.colors.map((c) => (
                               <span
                                 key={c.name}
@@ -617,15 +935,25 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
                             <Edit3 className="w-4 h-4" />
                           </button>
                           <button
-                            onClick={() => {
-                              if (confirm(`Yakin ingin menghapus produk "${product.name}"?`)) {
-                                onDeleteProduct(product.id);
+                            disabled={deletingProductId === product.id}
+                            onClick={async () => {
+                              if (confirm(`Yakin ingin menghapus produk "${product.name}" secara permanen dari database Supabase?`)) {
+                                setDeletingProductId(product.id);
+                                try {
+                                  await onDeleteProduct(product.id);
+                                } finally {
+                                  setDeletingProductId(null);
+                                }
                               }
                             }}
-                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-50 rounded-lg transition-colors cursor-pointer"
                             title="Hapus Produk"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            {deletingProductId === product.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin text-red-500" />
+                            ) : (
+                              <Trash2 className="w-4 h-4" />
+                            )}
                           </button>
                         </div>
                       </div>
@@ -646,11 +974,12 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
                   {editingProduct ? `Edit Katalog: ${editingProduct.name}` : 'Tambah Katalog Produk Baru'}
                 </h3>
                 <button
+                  disabled={isSavingProduct}
                   onClick={() => {
                     setEditingProduct(null);
                     setIsCreatingNew(false);
                   }}
-                  className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer"
+                  className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer disabled:opacity-40"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -740,13 +1069,13 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
                   />
                 </div>
 
-                {/* Image Uploader with Compression > 5MB & Dominant Color extraction */}
+                {/* Image Uploader with Compression > 5MB, Dominant Color extraction, and direct upload to POSSENSIOR MEDIA */}
                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h4 className="font-bold text-slate-800">Unggah Gambar Utama & Detail</h4>
+                      <h4 className="font-bold text-slate-800">Unggah Gambar Utama & Detail ke Storage Online</h4>
                       <p className="text-[11px] text-slate-500">
-                        Gambar di atas 5MB akan dikompresi otomatis oleh sistem agar optimal dan cepat dimuat.
+                        Gambar di atas 5MB akan dikompresi otomatis lalu diunggah ke bucket <strong>POSSENSIOR MEDIA</strong> pada folder <code>catalog/</code>.
                       </p>
                     </div>
                   </div>
@@ -768,7 +1097,12 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
                       {formImage && (
                         <div className="mt-2 flex items-center gap-2">
                           <img src={formImage} alt="Preview" className="w-12 h-12 rounded object-cover border" />
-                          <span className="text-[10px] text-emerald-700 font-semibold">✓ Gambar utama siap</span>
+                          <div className="flex flex-col">
+                            <span className="text-[10px] text-emerald-700 font-semibold">✓ Gambar utama siap</span>
+                            <span className="text-[9px] text-slate-400 font-mono truncate max-w-[200px]">
+                              {formImage.startsWith('http') ? 'Online URL' : 'Data URL'}
+                            </span>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -797,8 +1131,9 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
                   </div>
 
                   {formImageNotice && (
-                    <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-[11px] text-[#365E52] font-semibold">
-                      {formImageNotice}
+                    <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-[11px] text-[#365E52] font-semibold flex items-center gap-1.5">
+                      <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>{formImageNotice}</span>
                     </div>
                   )}
                 </div>
@@ -939,21 +1274,32 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
                 <div className="pt-3 border-t border-slate-100 flex justify-end gap-2.5">
                   <button
                     type="button"
+                    disabled={isSavingProduct}
                     onClick={() => {
                       setEditingProduct(null);
                       setIsCreatingNew(false);
                     }}
-                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl cursor-pointer"
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl cursor-pointer disabled:opacity-50"
                   >
                     Batal
                   </button>
 
                   <button
                     type="submit"
-                    className="px-5 py-2 bg-[#365E52] hover:bg-[#2A4B41] text-white font-bold rounded-xl shadow-md transition-colors cursor-pointer flex items-center gap-1.5"
+                    disabled={isSavingProduct}
+                    className="px-5 py-2 bg-[#365E52] hover:bg-[#2A4B41] text-white font-bold rounded-xl shadow-md transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
                   >
-                    <Save className="w-4 h-4" />
-                    <span>Simpan Katalog</span>
+                    {isSavingProduct ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Menyimpan ke Database...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4" />
+                        <span>Simpan Katalog</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </form>
