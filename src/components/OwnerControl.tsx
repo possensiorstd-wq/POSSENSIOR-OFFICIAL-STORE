@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Product, Order, ProductSize } from '../types/store';
+import { Product, Order, ProductSize, formatCategoryName } from '../types/store';
 import { SIZE_CHART } from '../data/products';
 import { 
   Lock, 
@@ -103,7 +103,7 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
   // Form Fields for Product
   const [formName, setFormName] = useState('');
   const [formSubtitle, setFormSubtitle] = useState('');
-  const [formCategory, setFormCategory] = useState<'tshirt' | 'longsleeve' | 'outerwear'>('tshirt');
+  const [formCategory, setFormCategory] = useState<'tees' | 'pants' | 'outerwear' | 'tshirt' | 'longsleeve'>('tees');
   const [formPrice, setFormPrice] = useState<number>(175000);
   const [formOriginalPrice, setFormOriginalPrice] = useState<number | undefined>(210000);
   const [formDescription, setFormDescription] = useState('');
@@ -411,7 +411,8 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
     setIsCreatingNew(false);
     setFormName(prod.name);
     setFormSubtitle(prod.subtitle);
-    setFormCategory(prod.category);
+    const normalizedCat = prod.category === 'tshirt' ? 'tees' : prod.category === 'longsleeve' ? 'pants' : prod.category;
+    setFormCategory(normalizedCat);
     setFormPrice(prod.price);
     setFormOriginalPrice(prod.originalPrice);
     setFormDescription(prod.description);
@@ -471,7 +472,7 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
     setEditingProduct(null);
     setFormName('');
     setFormSubtitle('');
-    setFormCategory('tshirt');
+    setFormCategory('tees');
     setFormPrice(175000);
     setFormOriginalPrice(210000);
     setFormDescription('');
@@ -1187,7 +1188,7 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
 
                         <div className="flex-1 min-w-0">
                           <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
-                            {product.category} · Stok: {product.stockCount} pcs
+                            {formatCategoryName(product.category)} · Stok: {product.stockCount} pcs
                           </span>
                           <h4 className="font-bold text-sm text-[#1E2927] truncate mt-0.5">{product.name}</h4>
                           <p className="text-xs text-slate-500 truncate">{product.subtitle}</p>
@@ -1300,8 +1301,8 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
                       onChange={(e) => setFormCategory(e.target.value as any)}
                       className="w-full p-2.5 border border-slate-200 rounded-lg focus:outline-none focus:border-[#365E52]"
                     >
-                      <option value="tshirt">Boxy T-Shirt</option>
-                      <option value="longsleeve">Longsleeve</option>
+                      <option value="tees">Tees</option>
+                      <option value="pants">Pants</option>
                       <option value="outerwear">Outerwear / Hoodie</option>
                     </select>
                   </div>

@@ -45,18 +45,18 @@ export const Footer: React.FC<FooterProps> = ({
               </li>
               <li>
                 <button
-                  onClick={() => onSelectCategory && onSelectCategory('tshirt')}
+                  onClick={() => onSelectCategory && onSelectCategory('tees')}
                   className="hover:text-[#365E52] transition-colors cursor-pointer"
                 >
-                  Boxy T-Shirt
+                  Tees
                 </button>
               </li>
               <li>
                 <button
-                  onClick={() => onSelectCategory && onSelectCategory('longsleeve')}
+                  onClick={() => onSelectCategory && onSelectCategory('pants')}
                   className="hover:text-[#365E52] transition-colors cursor-pointer"
                 >
-                  Longsleeve
+                  Pants
                 </button>
               </li>
               <li>

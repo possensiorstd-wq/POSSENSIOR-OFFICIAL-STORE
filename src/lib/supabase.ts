@@ -302,7 +302,7 @@ export function sanitizeOrderRecord(
       name: it?.name || 'Apparel Possensior',
       subtitle: '',
       slug: '',
-      category: 'tshirt',
+      category: 'tees',
       price: Number(it?.price || 0),
       description: '',
       material: '',

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Product, ProductSize } from '../types/store';
+import { Product, ProductSize, formatCategoryName } from '../types/store';
 import { X, Check, ShoppingBag, ShieldCheck, Truck, Ruler, Palette, ChevronLeft, ChevronRight } from 'lucide-react';
 import { SIZE_CHART } from '../data/products';
 import { PossensiorIcon } from './Logos';
@@ -328,7 +328,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
           <div>
             {/* Category and Fit Metadata */}
             <div className="flex items-center gap-2 text-xs text-slate-500 mb-1.5">
-              <span className="capitalize">{product.category}</span>
+              <span className="capitalize">{formatCategoryName(product.category)}</span>
               <span aria-hidden="true">·</span>
               <span>{product.material}</span>
             </div>

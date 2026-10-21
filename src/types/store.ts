@@ -1,4 +1,19 @@
-export type ProductCategory = 'all' | 'tshirt' | 'longsleeve' | 'outerwear';
+export type ProductCategory = 'all' | 'tees' | 'pants' | 'outerwear' | 'tshirt' | 'longsleeve';
+
+export const formatCategoryName = (category?: string): string => {
+  if (!category) return '';
+  const lower = category.toLowerCase().trim();
+  if (lower === 'tshirt' || lower === 'tees' || lower === 'boxy tshirt' || lower === 'boxy t-shirt') {
+    return 'Tees';
+  }
+  if (lower === 'longsleeve' || lower === 'pants') {
+    return 'Pants';
+  }
+  if (lower === 'outerwear') {
+    return 'Outerwear';
+  }
+  return category;
+};
 
 export type ProductSize = string;
 
@@ -7,7 +22,7 @@ export interface Product {
   name: string;
   subtitle: string;
   slug: string;
-  category: 'tshirt' | 'longsleeve' | 'outerwear';
+  category: 'tees' | 'pants' | 'outerwear' | 'tshirt' | 'longsleeve';
   price: number;
   originalPrice?: number;
   description: string;

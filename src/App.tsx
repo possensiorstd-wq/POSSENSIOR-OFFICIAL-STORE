@@ -376,8 +376,20 @@ export default function App() {
 
   // Filter and sort products
   const filteredProducts = products.filter((product) => {
-    const matchesCategory =
-      currentCategory === 'all' || product.category === currentCategory;
+    const isTees = (c: string) => c === 'tees' || c === 'tshirt';
+    const isPants = (c: string) => c === 'pants' || c === 'longsleeve';
+
+    let matchesCategory = false;
+    if (currentCategory === 'all') {
+      matchesCategory = true;
+    } else if (currentCategory === 'tees' || currentCategory === 'tshirt') {
+      matchesCategory = isTees(product.category);
+    } else if (currentCategory === 'pants' || currentCategory === 'longsleeve') {
+      matchesCategory = isPants(product.category);
+    } else {
+      matchesCategory = product.category === currentCategory;
+    }
+
     const matchesSearch =
       product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       product.subtitle.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -503,24 +515,24 @@ export default function App() {
                           Semua Produk ({products.length})
                         </button>
                         <button
-                          onClick={() => setCurrentCategory('tshirt')}
+                          onClick={() => setCurrentCategory('tees')}
                           className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-                            currentCategory === 'tshirt'
+                            currentCategory === 'tees' || currentCategory === 'tshirt'
                               ? 'bg-white text-[#365E52] shadow-xs'
                               : 'text-slate-600 hover:text-slate-900'
                           }`}
                         >
-                          Boxy T-Shirt
+                          Tees
                         </button>
                         <button
-                          onClick={() => setCurrentCategory('longsleeve')}
+                          onClick={() => setCurrentCategory('pants')}
                           className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-                            currentCategory === 'longsleeve'
+                            currentCategory === 'pants' || currentCategory === 'longsleeve'
                               ? 'bg-white text-[#365E52] shadow-xs'
                               : 'text-slate-600 hover:text-slate-900'
                           }`}
                         >
-                          Longsleeve
+                          Pants
                         </button>
                         <button
                           onClick={() => setCurrentCategory('outerwear')}

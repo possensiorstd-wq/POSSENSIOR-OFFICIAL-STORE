@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Product } from '../types/store';
+import { Product, formatCategoryName } from '../types/store';
 import { Eye, Plus, Sparkles } from 'lucide-react';
 import { PossensiorIcon } from './Logos';
 
@@ -98,7 +98,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         <div>
           {/* Metadata: Category & Fit (Unboxed clean text) */}
           <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
-            <span className="capitalize">{product.category}</span>
+            <span className="capitalize">{formatCategoryName(product.category)}</span>
             <span aria-hidden="true">·</span>
             <span>{product.fit}</span>
           </div>
