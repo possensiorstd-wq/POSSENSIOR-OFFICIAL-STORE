@@ -1,6 +1,5 @@
 import React from 'react';
-import { motion } from 'motion/react';
-import { PossensiorIcon } from './Logos';
+import greenLogo from '../assets/images/GREEN LOGO.png';
 
 interface LandingViewProps {
   onEnterStore: () => void;
@@ -29,9 +28,10 @@ export const LandingView: React.FC<LandingViewProps> = ({ onEnterStore }) => {
       <div className="flex flex-col items-center justify-center text-center">
         {/* Continuous Smooth Rotating Logo (Constant Speed) */}
         <div className="w-48 h-48 sm:w-56 sm:h-56 flex items-center justify-center drop-shadow-[0_20px_25px_rgba(54,94,82,0.15)] animate-spin-3d">
-          <PossensiorIcon
-            className="w-full h-full text-[#365E52] filter drop-shadow-md"
-            color="#365E52"
+          <img
+            src={greenLogo}
+            alt="Possensior Emblem"
+            className="w-full h-full object-contain filter drop-shadow-md select-none pointer-events-none"
           />
         </div>
 

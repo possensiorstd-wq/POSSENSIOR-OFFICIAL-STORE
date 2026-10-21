@@ -1,6 +1,6 @@
 import React from 'react';
 import { X, Mail, MessageCircle, Instagram, MapPin } from 'lucide-react';
-import { PossensiorWordmark } from './Logos';
+import homeHeaderLogo from '../assets/images/HOME HEADER LOGO.png';
 
 interface ContactModalProps {
   isOpen: boolean;
@@ -26,7 +26,11 @@ export const ContactModal: React.FC<ContactModalProps> = ({ isOpen, onClose }) =
 
         <div className="text-center mb-6">
           <div className="flex justify-center mb-2">
-            <PossensiorWordmark className="h-6 w-auto text-[#365E52]" color="#365E52" />
+            <img
+              src={homeHeaderLogo}
+              alt="Possensior Official Logo"
+              className="h-30 w-auto object-contain select-none"
+            />
           </div>
           <h2 className="text-xl font-extrabold text-[#1E2927]">Hubungi Kami</h2>
           <p className="text-xs text-slate-500 mt-1">

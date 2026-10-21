@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { PossensiorWordmark } from './Logos';
+import homeHeaderLogo from '../assets/images/HOME HEADER LOGO.png';
 import { ShoppingBag, Search, Menu, X, ArrowLeft, Info, PhoneCall } from 'lucide-react';
 
 interface NavbarProps {
@@ -28,14 +28,18 @@ export const Navbar: React.FC<NavbarProps> = ({
   return (
     <header className="sticky top-0 z-40 w-full bg-white/95 backdrop-blur-md border-b border-slate-200/90 transition-all">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-8">
-        {/* Zone 1: Brand Wordmark (HOME HEADER LOGO.png) */}
+        {/* Zone 1: Brand Logo (HOME HEADER LOGO.png) */}
         <div className="flex items-center gap-3 shrink-0">
           <button
             onClick={onGoHome}
             className="flex items-center gap-2 group cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#365E52] rounded-md p-1"
             title="Possensior Official Store"
           >
-            <PossensiorWordmark className="h-7 sm:h-8 w-auto text-[#365E52]" color="#365E52" />
+            <img
+              src={homeHeaderLogo}
+              alt="Possensior Official Store"
+              className="h-50 sm:h-51 w-auto max-h-90 object-contain select-none"
+            />
           </button>
         </div>
 

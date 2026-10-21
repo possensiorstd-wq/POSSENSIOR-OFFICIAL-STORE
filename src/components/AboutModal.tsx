@@ -1,6 +1,6 @@
 import React from 'react';
 import { X, Check } from 'lucide-react';
-import { PossensiorWordmark, PossensiorIcon } from './Logos';
+import homeHeaderLogo from '../assets/images/HOME HEADER LOGO.png';
 
 interface AboutModalProps {
   isOpen: boolean;
@@ -25,11 +25,16 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
         </button>
 
         <div className="text-center mb-5">
-          <div className="flex justify-center mb-2">
-            <PossensiorIcon className="w-12 h-12 text-[#365E52]" color="#365E52" />
-          </div>
-          <PossensiorWordmark className="h-6 w-auto mx-auto text-[#365E52]" color="#365E52" />
-        </div>
+ 
+  {/* Logo di bawahnya: HOME HEADER LOGO.png */}
+  <div className="flex justify-center -mt-2">
+    <img
+      src={homeHeaderLogo}
+      alt="Possensior Official Logo"
+      className="h-90 w-auto object-contain select-none"
+    />
+  </div>
+</div>
 
         {/* Exact Brand Ethos from Image 2 */}
         <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl mb-5">
