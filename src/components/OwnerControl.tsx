@@ -33,7 +33,9 @@ import {
   OWNER_UID, 
   uploadImageToSupabase, 
   dataUrlToBlob, 
-  isSupabaseConfigured 
+  isSupabaseConfigured,
+  subscribeToOrders,
+  migrateLocalStorageOrdersToDatabase
 } from '../lib/supabase';
 
 interface OwnerControlProps {
@@ -48,6 +50,7 @@ interface OwnerControlProps {
   onDeleteProduct: (productId: string) => Promise<boolean>;
   onMigrateDefaultProducts?: () => Promise<{ success: boolean; count?: number; message: string }>;
   onRefreshProducts?: () => Promise<void>;
+  onRefreshOrders?: () => Promise<void>;
   isDbConfigured?: boolean;
 }
 
@@ -63,6 +66,7 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
   onDeleteProduct,
   onMigrateDefaultProducts,
   onRefreshProducts,
+  onRefreshOrders,
   isDbConfigured = isSupabaseConfigured,
 }) => {
   // Authentication State
@@ -80,6 +84,9 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
   const [showBatchPrint, setShowBatchPrint] = useState(false);
   const [singlePrintOrder, setSinglePrintOrder] = useState<Order | null>(null);
   const [isDeletingOrderId, setIsDeletingOrderId] = useState<string | null>(null);
+  const [isLoadingOrders, setIsLoadingOrders] = useState(false);
+  const [orderFetchError, setOrderFetchError] = useState<string | null>(null);
+  const [isMigratingOrders, setIsMigratingOrders] = useState(false);
 
   // Temporary edit states for resi input
   const [resiInputs, setResiInputs] = useState<{ [orderId: string]: string }>({});
@@ -153,6 +160,59 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
     };
   }, []);
 
+  const loadOrdersFromDb = async () => {
+    if (!onRefreshOrders) return;
+    setIsLoadingOrders(true);
+    setOrderFetchError(null);
+    try {
+      await onRefreshOrders();
+    } catch (err: any) {
+      setOrderFetchError(err?.message || 'Gagal memuat pesanan dari database');
+    } finally {
+      setIsLoadingOrders(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isAuthenticated || !isOpen) return;
+
+    loadOrdersFromDb();
+
+    const unsubscribe = subscribeToOrders(() => {
+      loadOrdersFromDb();
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [isAuthenticated, isOpen]);
+
+  const handleMigrateLocalOrders = async () => {
+    if (!orders || orders.length === 0) {
+      alert('Tidak ada pesanan lokal untuk dimigrasikan.');
+      return;
+    }
+    const confirmed = window.confirm(
+      `Apakah kamu ingin memigrasikan ${orders.length} pesanan yang tersimpan di browser ini ke tabel database Supabase "public.possensior_orders"? Data yang sudah ada di database tidak akan diduplikasi.`
+    );
+    if (!confirmed) return;
+
+    setIsMigratingOrders(true);
+    try {
+      const { migratedCount, error } = await migrateLocalStorageOrdersToDatabase(orders);
+      if (error) {
+        alert(`Migrasi pesanan gagal: ${error}`);
+      } else {
+        alert(`Berhasil! ${migratedCount} pesanan lokal telah dimigrasikan ke database Supabase.`);
+        await loadOrdersFromDb();
+      }
+    } catch (err: any) {
+      alert(`Terjadi error saat migrasi: ${err?.message || 'Error tidak diketahui'}`);
+    } finally {
+      setIsMigratingOrders(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   // Supabase Auth Login handler
@@ -193,6 +253,7 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
       setOwnerEmail(data.user.email || emailInput.trim());
       setPasswordInput('');
       setAuthError(false);
+      loadOrdersFromDb();
     } catch (err: any) {
       setAuthErrorMessage(err?.message || 'Gagal menghubungi server autentikasi.');
       setAuthError(true);
@@ -250,10 +311,10 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
       courierResi: resiValue.trim(),
       paymentStatus: 'dikirim',
       timeline: [
-        ...order.timeline.map((t) => ({ ...t, current: false })),
+        ...(order.timeline || []).map((t) => ({ ...t, current: false })),
         {
           status: 'Paket Dikirim dengan Resi Kurir',
-          description: `Paket diserahkan ke kurir ${order.shipping.courier.toUpperCase()} dengan Nomor Resi: ${resiValue.trim()}.`,
+          description: `Paket diserahkan ke kurir ${(order.shipping?.courier || 'JNE').toUpperCase()} dengan Nomor Resi: ${resiValue.trim()}.`,
           timestamp: new Intl.DateTimeFormat('id-ID', { dateStyle: 'short', timeStyle: 'short' }).format(new Date()),
           completed: true,
           current: true,
@@ -779,14 +840,40 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
 
               <div className="flex items-center gap-2">
                 {activeTab === 'orders' && (
-                  <button
-                    type="button"
-                    onClick={() => setShowBatchPrint(true)}
-                    className="px-3.5 py-2 bg-slate-900 hover:bg-black text-white text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Printer className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Cetak Semua Resi Sekaligus</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {onRefreshOrders && (
+                      <button
+                        type="button"
+                        disabled={isLoadingOrders}
+                        onClick={loadOrdersFromDb}
+                        className="px-3 py-2 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        title="Perbarui daftar pesanan langsung dari database Supabase"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isLoadingOrders ? 'animate-spin text-[#365E52]' : ''}`} />
+                        <span className="hidden sm:inline">Segarkan Pesanan</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      disabled={isMigratingOrders}
+                      onClick={handleMigrateLocalOrders}
+                      className="px-3 py-2 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      title="Migrasikan pesanan browser ke database Supabase"
+                    >
+                      <Database className="w-3.5 h-3.5 text-blue-600" />
+                      <span className="hidden sm:inline">Migrasi Pesanan</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowBatchPrint(true)}
+                      className="px-3.5 py-2 bg-slate-900 hover:bg-black text-white text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Printer className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Cetak Semua Resi</span>
+                    </button>
+                  </div>
                 )}
 
                 {activeTab === 'catalog' && (
@@ -828,6 +915,35 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
               {/* TAB 1: ORDERS & TRACKING MANAGEMENT */}
               {activeTab === 'orders' && (
                 <div className="space-y-6">
+                  {/* Database Sync Banner */}
+                  <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl flex items-center justify-between gap-3 text-xs">
+                    <div className="flex items-center gap-2">
+                      <Database className="w-4 h-4 text-[#365E52] shrink-0" />
+                      <span className="text-slate-700 font-medium">
+                        Daftar pesanan tersinkronisasi online dengan tabel <strong>public.possensior_orders</strong> di Supabase.
+                      </span>
+                    </div>
+                    {isLoadingOrders && (
+                      <span className="flex items-center gap-1.5 text-[#365E52] font-semibold text-[11px] shrink-0">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Memuat...</span>
+                      </span>
+                    )}
+                  </div>
+
+                  {orderFetchError && (
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-center justify-between text-xs text-red-700">
+                      <span>{orderFetchError}</span>
+                      <button
+                        type="button"
+                        onClick={loadOrdersFromDb}
+                        className="px-2.5 py-1 bg-red-100 hover:bg-red-200 font-bold rounded-lg cursor-pointer"
+                      >
+                        Coba Lagi
+                      </button>
+                    </div>
+                  )}
+
                   {/* Status Filter */}
                   <div className="flex items-center justify-between flex-wrap gap-3">
                     <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-lg text-xs">
@@ -873,7 +989,7 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
                                 <span className="text-xs text-slate-500">{order.createdAt}</span>
                               </div>
                               <p className="text-xs text-slate-600 font-medium mt-0.5">
-                                Penerima: <strong>{order.shipping.fullName}</strong> ({order.shipping.phone}) · {order.shipping.city}
+                                Penerima: <strong>{order.shipping?.fullName || 'Penerima'}</strong> ({order.shipping?.phone || '-'}) · {order.shipping?.city || '-'}
                               </p>
                             </div>
 
@@ -927,13 +1043,13 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
                                 Item Pesanan:
                               </span>
                               <div className="mt-1 space-y-1">
-                                {order.items.map((it) => (
+                                {(order.items || []).map((it) => (
                                   <div key={it.id} className="flex items-center justify-between">
                                     <span>
-                                      {it.product.name} ({it.selectedSize} · {it.selectedColor}) × {it.quantity}
+                                      {it.product?.name || 'Apparel Possensior'} ({it.selectedSize} · {it.selectedColor}) × {it.quantity}
                                     </span>
                                     <span className="font-mono text-slate-600">
-                                      {formatRupiah(it.product.price * it.quantity)}
+                                      {formatRupiah((it.product?.price || 0) * it.quantity)}
                                     </span>
                                   </div>
                                 ))}
@@ -945,7 +1061,7 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
                                 Pengiriman & Total:
                               </span>
                               <p className="mt-1 text-slate-700">
-                                Kurir: <strong className="uppercase">{order.shipping.courier}</strong> · Alamat: {order.shipping.address}, {order.shipping.city}
+                                Kurir: <strong className="uppercase">{order.shipping?.courier || 'JNE'}</strong> · Alamat: {order.shipping?.address || '-'}, {order.shipping?.city || '-'}
                               </p>
                               <p className="font-bold text-sm text-[#365E52] mt-1 font-mono">
                                 Total: {formatRupiah(order.total)}

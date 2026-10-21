@@ -36,10 +36,12 @@ export interface ShippingInfo {
   fullName: string;
   phone: string;
   address: string;
+  district?: string;
+  subdistrict?: string;
   city: string;
   province: string;
   postalCode: string;
-  courier: 'jne' | 'sicepat' | 'jnt';
+  courier: 'jne' | 'jnt' | 'spx';
   shippingCost: number;
   notes?: string;
 }
@@ -57,10 +59,13 @@ export interface BankAccount {
 
 export interface Order {
   id: string;
+  dbId?: number | string;
   invoiceNumber: string;
+  orderNumber?: string;
   createdAt: string;
   items: CartItem[];
   subtotal: number;
+  otherFees?: number;
   shippingCost: number;
   discount: number;
   total: number;

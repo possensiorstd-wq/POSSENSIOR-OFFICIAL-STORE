@@ -17,6 +17,7 @@ import {
   MessageCircle
 } from 'lucide-react';
 import { PossensiorIcon } from './Logos';
+import { saveOrderToDatabase } from '../lib/supabase';
 
 interface CheckoutViewProps {
   items: CartItem[];
@@ -35,10 +36,12 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
+  const [district, setDistrict] = useState('');
+  const [subdistrict, setSubdistrict] = useState('');
   const [city, setCity] = useState('Jakarta Selatan');
   const [province, setProvince] = useState('DKI Jakarta');
   const [postalCode, setPostalCode] = useState('12190');
-  const [courier, setCourier] = useState<'jne' | 'sicepat' | 'jnt'>('sicepat');
+  const [courier, setCourier] = useState<'jne' | 'jnt' | 'spx'>('jne');
   const [notes, setNotes] = useState('');
 
   // Payment State
@@ -46,23 +49,17 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
   const [selectedBank, setSelectedBank] = useState<BankAccount>(BANK_ACCOUNTS[0]);
   const [copiedBank, setCopiedBank] = useState(false);
   const [downloadedQRIS, setDownloadedQRIS] = useState(false);
-  const [uploadedProof, setUploadedProof] = useState<string | null>(null);
-  const [proofPreviewUrl, setProofPreviewUrl] = useState<string | null>(null);
   const [copiedAmount, setCopiedAmount] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [savedConfirmedOrder, setSavedConfirmedOrder] = useState<Order | null>(null);
 
-  // Calculate pricing
+  // Calculate pricing: 5% other fees as per Possensior original system
   const subtotal = items.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
   const discountAmount = discount > 0 ? Math.round(subtotal * (discount / 100)) : 0;
-  
-  const courierRates = {
-    jne: 18000,
-    sicepat: 20000,
-    jnt: 19000,
-  };
-  const shippingCost = courierRates[courier];
-  const grandTotal = Math.max(0, subtotal - discountAmount + shippingCost);
+  const otherFees = Math.round(subtotal * 0.05);
+  const shippingCost = 0; // Included in 5% other fees
+  const grandTotal = Math.max(0, subtotal - discountAmount + otherFees);
 
   const formatRupiah = (num: number) => {
     return new Intl.NumberFormat('id-ID', {
@@ -82,18 +79,6 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
     navigator.clipboard.writeText(selectedBank.accountNumber);
     setCopiedBank(true);
     setTimeout(() => setCopiedBank(false), 2500);
-  };
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      setUploadedProof(file.name);
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        setProofPreviewUrl(ev.target?.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
   };
 
   const handleDownloadQRIS = () => {
@@ -203,9 +188,11 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
     };
   };
 
-  const handleSendProofViaWhatsApp = () => {
+  const processOrderSubmission = async (method: 'qris' | 'bank_transfer') => {
+    if (isSubmitting) return;
+
     if (!fullName.trim() || !phone.trim() || !address.trim() || !city.trim()) {
-      setFormError('Harap lengkapi nama penerima, nomor WhatsApp, dan alamat pengiriman terlebih dahulu sebelum mengirim bukti pembayaran.');
+      setFormError('Harap lengkapi nama penerima, nomor WhatsApp/telepon, alamat pengiriman, dan kota/kabupaten.');
       window.scrollTo({ top: 120, behavior: 'smooth' });
       return;
     }
@@ -213,91 +200,119 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
     setIsSubmitting(true);
     setFormError(null);
 
-    const randomSuffix = Math.floor(100000 + Math.random() * 900000);
-    const invoiceNumber = `POSS-${randomSuffix}`;
+    try {
+      let confirmedOrder = savedConfirmedOrder;
 
-    const newOrder: Order = {
-      id: `order-${Date.now()}`,
-      invoiceNumber,
-      createdAt: new Intl.DateTimeFormat('id-ID', {
-        dateStyle: 'medium',
-        timeStyle: 'short',
-      }).format(new Date()),
-      items: [...items],
-      subtotal,
-      shippingCost,
-      discount: discountAmount,
-      total: grandTotal,
-      shipping: {
-        fullName: fullName.trim(),
-        phone: phone.trim(),
-        address: address.trim(),
-        city: city.trim(),
-        province,
-        postalCode,
-        courier,
-        shippingCost,
-        notes: notes.trim(),
-      },
-      paymentMethod: 'qris',
-      paymentStatus: 'menunggu_pembayaran',
-      trackingNumber: invoiceNumber,
-      proofUploaded: false,
-      timeline: [
-        {
-          status: 'Pesanan Dibuat',
-          description: `Pesanan ${invoiceNumber} berhasil dicatat di sistem Possensior.`,
-          timestamp: 'Baru saja',
-          completed: true,
-        },
-        {
-          status: 'Menunggu Pembayaran Berhasil',
-          description: 'Pesanan telah dikonfirmasi dan menunggu verifikasi bukti pembayaran QRIS dari chat WhatsApp.',
-          timestamp: 'Menunggu tindakan',
-          completed: false,
-          current: true,
-        },
-        {
-          status: 'Pengemasan & Quality Control',
-          description: 'Barang sedang dipersiapkan dan diinspeksi di warehouse Possensior.',
-          timestamp: 'Menunggu',
-          completed: false,
-        },
-        {
-          status: 'Pengiriman Kurir',
-          description: `Akan dikirim menggunakan ${courier.toUpperCase()}.`,
-          timestamp: 'Estimasi 1-2 hari',
-          completed: false,
-        },
-        {
-          status: 'Pesanan Selesai',
-          description: 'Paket telah sampai di alamat tujuan.',
-          timestamp: 'Estimasi 2-3 hari',
-          completed: false,
-        },
-      ],
-    };
+      // Only perform database insert if order was not already saved during this checkout session
+      if (!confirmedOrder) {
+        const orderToSave: Order = {
+          id: `order-${Date.now()}`,
+          invoiceNumber: '', // Official number will be assigned by Supabase database (PS-0000X)
+          createdAt: new Intl.DateTimeFormat('id-ID', {
+            dateStyle: 'medium',
+            timeStyle: 'short',
+          }).format(new Date()),
+          items: [...items],
+          subtotal,
+          otherFees,
+          shippingCost: 0,
+          discount: discountAmount,
+          total: grandTotal,
+          shipping: {
+            fullName: fullName.trim(),
+            phone: phone.trim(),
+            address: address.trim(),
+            district: district.trim(),
+            subdistrict: subdistrict.trim(),
+            city: city.trim(),
+            province,
+            postalCode: postalCode.trim(),
+            courier,
+            shippingCost: 0,
+            notes: notes.trim(),
+          },
+          paymentMethod: method,
+          selectedBank: method === 'bank_transfer' ? selectedBank : undefined,
+          paymentStatus: 'menunggu_pembayaran',
+          trackingNumber: '',
+          proofUploaded: true,
+          timeline: [
+            {
+              status: 'Pesanan Dibuat',
+              description: 'Pesanan berhasil dicatat di sistem Possensior.',
+              timestamp: 'Baru saja',
+              completed: true,
+            },
+            {
+              status: method === 'qris' ? 'Menunggu Konfirmasi QRIS' : 'Menunggu Konfirmasi Transfer',
+              description:
+                method === 'qris'
+                  ? 'Pesanan telah dicatat di database Supabase dan menunggu bukti pembayaran QRIS melalui WhatsApp.'
+                  : `Menunggu transfer ke rekening ${selectedBank.name} (${selectedBank.accountNumber}) dan verifikasi bukti via WhatsApp.`,
+              timestamp: 'Menunggu tindakan',
+              completed: false,
+              current: true,
+            },
+            {
+              status: 'Pengemasan & Quality Control',
+              description: 'Barang sedang dipersiapkan dan diinspeksi di warehouse Possensior.',
+              timestamp: 'Menunggu',
+              completed: false,
+            },
+            {
+              status: 'Pengiriman Kurir',
+              description: `Akan dikirim menggunakan ${courier.toUpperCase()}.`,
+              timestamp: 'Estimasi 1-2 hari',
+              completed: false,
+            },
+            {
+              status: 'Pesanan Selesai',
+              description: 'Paket telah sampai di alamat tujuan.',
+              timestamp: 'Estimasi 2-3 hari',
+              completed: false,
+            },
+          ],
+        };
 
-    const productListText = items
-      .map(
-        (it, idx) =>
-          `  ${idx + 1}. *${it.product.name}*\n     Size: ${it.selectedSize} · Warna: ${it.selectedColor} · Qty: ${it.quantity} pcs (${formatRupiah(it.product.price * it.quantity)})`
-      )
-      .join('\n');
+        // Direct write to public.possensior_orders table first
+        const { order: newlySavedOrder, error: dbError } = await saveOrderToDatabase(orderToSave);
 
-    const waMessage = 
+        if (dbError || !newlySavedOrder) {
+          setIsSubmitting(false);
+          setFormError(
+            `Gagal menyimpan pesanan ke database Supabase: ${dbError || 'Terjadi gangguan koneksi'}. Silakan coba tekan tombol kembali untuk mencoba lagi. Data checkout Anda tetap tersimpan dan tidak akan hilang.`
+          );
+          return;
+        }
+
+        confirmedOrder = newlySavedOrder;
+        setSavedConfirmedOrder(newlySavedOrder);
+      }
+
+      const productListText = items
+        .map(
+          (it, idx) =>
+            `  ${idx + 1}. *${it.product.name}*\n     Size: ${it.selectedSize} · Warna: ${it.selectedColor} · Qty: ${it.quantity} pcs (${formatRupiah(it.product.price * it.quantity)})`
+        )
+        .join('\n');
+
+      const addressFull = `${address.trim()}${district ? `, Kec. ${district.trim()}` : ''}${subdistrict ? `, Kel. ${subdistrict.trim()}` : ''}, ${city.trim()}, ${province} ${postalCode.trim()}`;
+
+      let waMessage = '';
+      if (method === 'qris') {
+        waMessage = 
 `Halo Admin POSSENSIOR, saya ingin konfirmasi pesanan dan mengirimkan bukti pembayaran QRIS.
 
 📦 *INFORMASI PESANAN*
-• No. Invoice: *${invoiceNumber}*
-• Tanggal: ${newOrder.createdAt}
+• No. Pesanan Resmi: *${confirmedOrder.invoiceNumber}*
+• Tanggal: ${confirmedOrder.createdAt}
 • Total Tagihan: *${formatRupiah(grandTotal)}* (QRIS Manual)
 
 👤 *DATA PENERIMA*
 • Nama Penerima: ${fullName.trim()}
 • No. WhatsApp / HP: ${phone.trim()}
-• Alamat Pengiriman: ${address.trim()}, ${city.trim()}, ${province} ${postalCode}
-• Ekspedisi: ${courier.toUpperCase()} (${formatRupiah(shippingCost)})
+• Alamat Pengiriman: ${addressFull}
+• Ekspedisi: ${courier.toUpperCase()}
 ${notes.trim() ? `• Catatan Pengiriman: ${notes.trim()}\n` : ''}
 👕 *DAFTAR PRODUK*
 ${productListText}
@@ -310,107 +325,60 @@ ${productListText}
 --------------------------------------------
 📌 *PENTING*:
 Saya melampirkan foto / tangkapan layar bukti transfer atau pembayaran QRIS pada pesan ini. Mohon admin segera memverifikasi pesanan saya. Terima kasih!`;
+      } else {
+        waMessage = 
+`Halo Admin POSSENSIOR, saya ingin konfirmasi pesanan dan mengirimkan bukti pembayaran transfer bank.
 
-    const waUrl = `https://wa.me/${QRIS_MANUAL_CONFIG.adminWhatsApp}?text=${encodeURIComponent(waMessage)}`;
+📦 *INFORMASI PESANAN*
+• No. Pesanan Resmi: *${confirmedOrder.invoiceNumber}*
+• Tanggal: ${confirmedOrder.createdAt}
+• Total Tagihan: *${formatRupiah(grandTotal)}*
 
-    // Open WhatsApp
-    window.open(waUrl, '_blank');
+👤 *DATA PENERIMA*
+• Nama Penerima: ${fullName.trim()}
+• No. WhatsApp / HP: ${phone.trim()}
+• Alamat Pengiriman: ${addressFull}
+• Ekspedisi: ${courier.toUpperCase()}
+${notes.trim() ? `• Catatan Pengiriman: ${notes.trim()}\n` : ''}
+👕 *DAFTAR PRODUK*
+${productListText}
 
-    setIsSubmitting(false);
-    onOrderCompleted(newOrder);
+💳 *METODE PEMBAYARAN*
+• Metode: Transfer Bank Manual
+• Bank Tujuan: *${selectedBank.name}*
+• No. Rekening: *${selectedBank.accountNumber}* (a/n ${selectedBank.accountHolder})
+• Nominal Yang Ditransfer: *${formatRupiah(grandTotal)}*
+• Status: *Menunggu Verifikasi Pembayaran*
+
+--------------------------------------------
+📌 *PENTING*:
+Saya melampirkan foto / bukti transfer bank pada pesan WhatsApp ini. Mohon admin memeriksa pembayaran dan memproses pesanan saya. Terima kasih!`;
+      }
+
+      const waUrl = `https://wa.me/6285777240570?text=${encodeURIComponent(waMessage)}`;
+      window.open(waUrl, '_blank');
+
+      setIsSubmitting(false);
+      onOrderCompleted(confirmedOrder);
+    } catch (err: any) {
+      setIsSubmitting(false);
+      setFormError(
+        `Terjadi kendala saat memproses pesanan: ${err?.message || 'Error tidak diketahui'}. Data Anda tetap aman, silakan coba kembali.`
+      );
+    }
+  };
+
+  const handleSendProofViaWhatsApp = () => {
+    processOrderSubmission(paymentMethod);
   };
 
   const handleSubmitOrder = (e: React.FormEvent) => {
     e.preventDefault();
-
     if (paymentMethod === 'qris') {
-      handleSendProofViaWhatsApp();
-      return;
+      processOrderSubmission('qris');
+    } else {
+      processOrderSubmission('bank_transfer');
     }
-
-    if (paymentMethod === 'bank_transfer' && !uploadedProof) {
-      setFormError('Wajib melampirkan foto struk transfer sebelum menekan tombol bayar dan konfirmasi.');
-      return;
-    }
-    if (!fullName.trim() || !phone.trim() || !address.trim() || !city.trim()) {
-      setFormError('Harap lengkapi nama penerima, nomor WhatsApp, dan alamat pengiriman.');
-      return;
-    }
-
-    setIsSubmitting(true);
-    setFormError(null);
-
-    const randomSuffix = Math.floor(100000 + Math.random() * 900000);
-    const invoiceNumber = `POSS-${randomSuffix}`;
-
-    setTimeout(() => {
-      const newOrder: Order = {
-        id: `order-${Date.now()}`,
-        invoiceNumber,
-        createdAt: new Intl.DateTimeFormat('id-ID', {
-          dateStyle: 'medium',
-          timeStyle: 'short',
-        }).format(new Date()),
-        items: [...items],
-        subtotal,
-        shippingCost,
-        discount: discountAmount,
-        total: grandTotal,
-        shipping: {
-          fullName,
-          phone,
-          address,
-          city,
-          province,
-          postalCode,
-          courier,
-          shippingCost,
-          notes,
-        },
-        paymentMethod,
-        selectedBank: paymentMethod === 'bank_transfer' ? selectedBank : undefined,
-        paymentStatus: 'menunggu_pembayaran',
-        trackingNumber: invoiceNumber,
-        proofUploaded: !!uploadedProof,
-        proofFileName: uploadedProof || undefined,
-        timeline: [
-          {
-            status: 'Pesanan Dibuat',
-            description: `Pesanan ${invoiceNumber} berhasil dicatat di sistem Possensior.`,
-            timestamp: 'Baru saja',
-            completed: true,
-          },
-          {
-            status: 'Menunggu Konfirmasi Pembayaran',
-            description: `Menunggu transfer ke rekening ${selectedBank.name}.`,
-            timestamp: 'Menunggu tindakan',
-            completed: false,
-            current: true,
-          },
-          {
-            status: 'Pengemasan & Quality Control',
-            description: 'Barang sedang dipersiapkan dan diinspeksi di warehouse Possensior.',
-            timestamp: 'Menunggu',
-            completed: false,
-          },
-          {
-            status: 'Pengiriman Kurir',
-            description: `Akan dikirim menggunakan ${courier.toUpperCase()}.`,
-            timestamp: 'Estimasi 1-2 hari',
-            completed: false,
-          },
-          {
-            status: 'Pesanan Selesai',
-            description: 'Paket telah sampai di alamat tujuan.',
-            timestamp: 'Estimasi 2-3 hari',
-            completed: false,
-          },
-        ],
-      };
-
-      setIsSubmitting(false);
-      onOrderCompleted(newOrder);
-    }, 800);
   };
 
   return (
@@ -490,14 +458,40 @@ Saya melampirkan foto / tangkapan layar bukti transfer atau pembayaran QRIS pada
 
                 <div className="sm:col-span-2">
                   <label className="block font-semibold text-slate-700 mb-1">
-                    Alamat Lengkap (Jalan, Nomor Rumah, RT/RW, Kelurahan, Kecamatan) *
+                    Alamat Lengkap (Jalan, Nomor Rumah, RT/RW) *
                   </label>
                   <textarea
                     required
                     rows={2}
                     value={address}
                     onChange={(e) => setAddress(e.target.value)}
-                    placeholder="Jl. Fatmawati Raya No. 12, RT 03/05, Cilandak Barat"
+                    placeholder="Jl. Fatmawati Raya No. 12, RT 03/05"
+                    className="w-full p-2.5 border border-slate-200 rounded-lg focus:outline-none focus:border-[#365E52]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Kecamatan
+                  </label>
+                  <input
+                    type="text"
+                    value={district}
+                    onChange={(e) => setDistrict(e.target.value)}
+                    placeholder="Contoh: Cilandak"
+                    className="w-full p-2.5 border border-slate-200 rounded-lg focus:outline-none focus:border-[#365E52]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Kelurahan / Desa
+                  </label>
+                  <input
+                    type="text"
+                    value={subdistrict}
+                    onChange={(e) => setSubdistrict(e.target.value)}
+                    placeholder="Contoh: Cilandak Barat"
                     className="w-full p-2.5 border border-slate-200 rounded-lg focus:outline-none focus:border-[#365E52]"
                   />
                 </div>
@@ -538,30 +532,16 @@ Saya melampirkan foto / tangkapan layar bukti transfer atau pembayaran QRIS pada
                 <div className="grid grid-cols-3 gap-2.5">
                   <button
                     type="button"
-                    onClick={() => setCourier('sicepat')}
-                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
-                      courier === 'sicepat'
-                        ? 'border-[#365E52] bg-[#365E52]/5 text-[#365E52] font-semibold'
-                        : 'border-slate-200 text-slate-600 hover:border-slate-300'
-                    }`}
-                  >
-                    <span className="block text-xs font-bold">SiCepat BEST</span>
-                    <span className="block text-[11px] text-slate-500 mt-0.5">1-2 Hari</span>
-                    <span className="block text-xs font-mono font-bold mt-1 text-[#365E52]">Rp 20.000</span>
-                  </button>
-
-                  <button
-                    type="button"
                     onClick={() => setCourier('jne')}
                     className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
                       courier === 'jne'
-                        ? 'border-[#365E52] bg-[#365E52]/5 text-[#365E52] font-semibold'
+                        ? 'border-[#365E52] bg-[#365E52]/5 text-[#365E52] font-semibold ring-1 ring-[#365E52]'
                         : 'border-slate-200 text-slate-600 hover:border-slate-300'
                     }`}
                   >
-                    <span className="block text-xs font-bold">JNE Reguler</span>
-                    <span className="block text-[11px] text-slate-500 mt-0.5">2-3 Hari</span>
-                    <span className="block text-xs font-mono font-bold mt-1 text-[#365E52]">Rp 18.000</span>
+                    <span className="block text-xs font-bold">1. JNE</span>
+                    <span className="block text-[11px] text-slate-500 mt-0.5">JNE Reguler</span>
+                    <span className="block text-[10px] font-medium text-emerald-700 mt-1">Termasuk Biaya 5%</span>
                   </button>
 
                   <button
@@ -569,13 +549,27 @@ Saya melampirkan foto / tangkapan layar bukti transfer atau pembayaran QRIS pada
                     onClick={() => setCourier('jnt')}
                     className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
                       courier === 'jnt'
-                        ? 'border-[#365E52] bg-[#365E52]/5 text-[#365E52] font-semibold'
+                        ? 'border-[#365E52] bg-[#365E52]/5 text-[#365E52] font-semibold ring-1 ring-[#365E52]'
                         : 'border-slate-200 text-slate-600 hover:border-slate-300'
                     }`}
                   >
-                    <span className="block text-xs font-bold">J&T Express</span>
-                    <span className="block text-[11px] text-slate-500 mt-0.5">1-3 Hari</span>
-                    <span className="block text-xs font-mono font-bold mt-1 text-[#365E52]">Rp 19.000</span>
+                    <span className="block text-xs font-bold">2. J&T</span>
+                    <span className="block text-[11px] text-slate-500 mt-0.5">J&T Express</span>
+                    <span className="block text-[10px] font-medium text-emerald-700 mt-1">Termasuk Biaya 5%</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setCourier('spx')}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                      courier === 'spx'
+                        ? 'border-[#365E52] bg-[#365E52]/5 text-[#365E52] font-semibold ring-1 ring-[#365E52]'
+                        : 'border-slate-200 text-slate-600 hover:border-slate-300'
+                    }`}
+                  >
+                    <span className="block text-xs font-bold">3. SPX</span>
+                    <span className="block text-[11px] text-slate-500 mt-0.5">SPX Express</span>
+                    <span className="block text-[10px] font-medium text-emerald-700 mt-1">Termasuk Biaya 5%</span>
                   </button>
                 </div>
               </div>
@@ -724,9 +718,17 @@ Saya melampirkan foto / tangkapan layar bukti transfer atau pembayaran QRIS pada
                     </button>
                   </div>
 
-                  <p className="text-xs text-slate-600 mt-3 font-medium">
-                    Buka m-banking (BCA, Livin, dll) atau e-wallet (GoPay, OVO, Dana, ShopeePay). Scan QRIS di atas dan ketikkan nominal manual sebesar <strong className="text-[#365E52] font-mono">{formatRupiah(grandTotal)}</strong>.
-                  </p>
+                  {/* Official Formal Steps: Cara Pembayaran QRIS */}
+                  <div className="mt-4 p-4 bg-white border border-slate-200 rounded-xl text-left text-xs space-y-2.5">
+                    <span className="font-bold text-[#1E2927] block text-xs">Cara Pembayaran QRIS:</span>
+                    <ol className="list-decimal list-inside space-y-1.5 text-slate-600 leading-relaxed text-[11px]">
+                      <li>Unduh gambar QRIS atau pindai kode QRIS menggunakan aplikasi pembayaran yang mendukung QRIS.</li>
+                      <li>Masukkan nominal pembayaran yang tertera pada halaman ini. Gunakan tombol salin nominal jika tersedia.</li>
+                      <li>Selesaikan pembayaran dan simpan tangkapan layar atau bukti pembayaran.</li>
+                      <li>Tekan tombol <strong>Kirim Bukti Pembayaran</strong> untuk mengirimkan bukti transfer via WhatsApp ke admin POSSENSIOR.</li>
+                      <li>Pesanan akan diproses setelah pembayaran diverifikasi oleh admin.</li>
+                    </ol>
+                  </div>
 
                   {/* Action Buttons: Unduh QRIS & Kirim Bukti Pembayaran */}
                   <div className="mt-4 flex flex-col items-center gap-2 max-w-sm mx-auto">
@@ -753,68 +755,80 @@ Saya melampirkan foto / tangkapan layar bukti transfer atau pembayaran QRIS pada
                       )}
                     </button>
 
-                    {/* Tombol Kirim Bukti Pembayaran dibawah tombol unduh */}
+                    {/* Tombol Kirim Bukti Pembayaran */}
                     <button
                       type="button"
                       onClick={handleSendProofViaWhatsApp}
-                      className="w-full py-3.5 bg-[#25D366] hover:bg-[#20ba59] text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99]"
+                      disabled={isSubmitting}
+                      className="w-full py-3.5 bg-[#25D366] hover:bg-[#20ba59] text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99] disabled:opacity-50"
                     >
                       <MessageCircle className="w-4 h-4 fill-current" />
-                      <span>Kirim Bukti Pembayaran</span>
+                      <span>{isSubmitting ? 'Menyimpan Pesanan...' : 'Kirim Bukti Pembayaran'}</span>
                     </button>
 
                     <span className="text-[10px] text-slate-500 leading-tight">
-                      Setelah mengklik tombol di atas, Anda akan diarahkan ke WhatsApp untuk mengirim bukti pembayaran. Pesanan Anda akan otomatis dicatat dan menunggu verifikasi.
+                      Setelah mengklik tombol di atas, Anda akan diarahkan ke WhatsApp untuk mengirim bukti pembayaran. Pesanan Anda otomatis tersimpan di database dan menunggu verifikasi admin.
                     </span>
                   </div>
                 </div>
               )}
 
-              {/* Bank Transfer Manual Container */}
+              {/* Bank Transfer Manual Container (Mengikuti alur QRIS wajib kirim bukti ke WhatsApp) */}
               {paymentMethod === 'bank_transfer' && (
-                <div className="space-y-4">
-                  {/* Select Bank */}
-                  <div>
+                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 text-center space-y-4">
+                  <div className="flex items-center justify-between text-xs font-medium text-slate-600 px-1">
+                    <span className="font-bold text-[#365E52] flex items-center gap-1.5">
+                      <CreditCard className="w-4 h-4" />
+                      <span>TRANSFER BANK MANUAL</span>
+                    </span>
+                    <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100/90 px-2.5 py-0.5 rounded-full">
+                      Tepat 2 Rekening Resmi
+                    </span>
+                  </div>
+
+                  {/* Select Bank (Strictly BCA and CIMB NIAGA) */}
+                  <div className="text-left">
                     <label className="block text-xs font-semibold text-slate-700 mb-2">
-                      Pilih Rekening Tujuan:
+                      Pilih Rekening Tujuan Pembayaran:
                     </label>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div className="grid grid-cols-2 gap-3">
                       {BANK_ACCOUNTS.map((bank) => (
                         <button
                           key={bank.id}
                           type="button"
                           onClick={() => setSelectedBank(bank)}
-                          className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer ${
+                          className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
                             selectedBank.id === bank.id
-                              ? 'border-[#365E52] bg-[#365E52]/10 text-[#365E52] font-bold shadow-xs'
+                              ? 'border-[#365E52] bg-white text-[#365E52] font-bold shadow-xs ring-2 ring-[#365E52]/20'
                               : 'border-slate-200 text-slate-600 hover:border-slate-300 bg-white'
                           }`}
                         >
-                          <span className="block text-xs font-bold">{bank.code}</span>
-                          <span className="block text-[11px] text-slate-500 mt-0.5">{bank.name.split(' ')[0]}</span>
+                          <span className="block text-xs font-bold text-[#1E2927]">{bank.name}</span>
+                          <span className="block font-mono text-xs text-slate-500 mt-1">{bank.accountNumber}</span>
+                          <span className="block text-[10px] text-slate-400 mt-0.5">a/n {bank.accountHolder}</span>
                         </button>
                       ))}
                     </div>
                   </div>
 
-                  {/* Account Card with Copy Button */}
-                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
+                  {/* Active Bank Account Card with Copy Button */}
+                  <div className="p-4 bg-white border border-slate-200 rounded-xl flex items-center justify-between text-left shadow-xs">
                     <div>
-                      <span className="text-[11px] font-bold uppercase text-slate-400 block">
+                      <span className="text-[10px] font-bold uppercase text-slate-400 block tracking-wider">
                         {selectedBank.name}
                       </span>
-                      <span className="text-base sm:text-lg font-extrabold text-[#1E2927] font-mono tracking-wider mt-0.5 block">
+                      <span className="text-base sm:text-xl font-extrabold text-[#1E2927] font-mono tracking-wider mt-0.5 block">
                         {selectedBank.accountNumber}
                       </span>
                       <span className="text-xs text-slate-600 font-medium block mt-0.5">
-                        a/n {selectedBank.accountHolder}
+                        Atas Nama: <strong>{selectedBank.accountHolder}</strong>
                       </span>
                     </div>
 
                     <button
                       type="button"
                       onClick={handleCopyAccount}
-                      className="px-3 py-2 bg-white hover:bg-slate-100 border border-slate-200 text-[#365E52] text-xs font-bold rounded-lg shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                      className="px-3.5 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-[#365E52] text-xs font-bold rounded-lg shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
                     >
                       {copiedBank ? (
                         <>
@@ -830,58 +844,65 @@ Saya melampirkan foto / tangkapan layar bukti transfer atau pembayaran QRIS pada
                     </button>
                   </div>
 
-                  {/* Upload Transfer Proof (Mandatory for Bank Transfer) */}
-                  <div className="pt-2">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <label className="text-xs font-bold text-slate-800 flex items-center gap-1">
-                        <span>Unggah Foto Struk Transfer</span>
-                        <span className="text-red-500 font-bold">*Wajib</span>
-                      </label>
-                      {uploadedProof ? (
-                        <span className="text-[11px] text-emerald-700 font-semibold flex items-center gap-1">
-                          <Check className="w-3.5 h-3.5" />
-                          <span>Struk Terlampir</span>
-                        </span>
-                      ) : (
-                        <span className="text-[11px] text-amber-600 font-medium">
-                          Belum Dilampirkan
-                        </span>
-                      )}
+                  {/* Manual Nominal Box with 1-Click Copy */}
+                  <div className="p-3.5 bg-emerald-50/80 border border-emerald-200/90 rounded-xl flex items-center justify-between text-left shadow-2xs">
+                    <div>
+                      <span className="text-[10px] font-bold uppercase text-[#365E52]/80 block">
+                        Nominal Yang Harus Ditransfer:
+                      </span>
+                      <span className="text-lg font-extrabold text-[#365E52] font-mono tracking-tight">
+                        {formatRupiah(grandTotal)}
+                      </span>
                     </div>
 
-                    <label className={`border-2 border-dashed rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer transition-colors ${
-                      uploadedProof 
-                        ? 'border-[#365E52] bg-[#365E52]/5' 
-                        : 'border-slate-300 hover:border-[#365E52] bg-slate-50/70 hover:bg-slate-50'
-                    }`}>
-                      {proofPreviewUrl ? (
-                        <div className="flex flex-col items-center gap-2 text-center">
-                          <img
-                            src={proofPreviewUrl}
-                            alt="Bukti Transfer"
-                            className="w-24 h-24 object-cover rounded-lg border border-slate-300 shadow-xs"
-                          />
-                          <span className="text-xs text-[#365E52] font-bold">{uploadedProof}</span>
-                          <span className="text-[10px] text-slate-500 underline">Klik untuk mengganti foto struk</span>
-                        </div>
+                    <button
+                      type="button"
+                      onClick={handleCopyAmount}
+                      className="px-3 py-1.5 bg-white hover:bg-slate-50 border border-emerald-300 text-[#365E52] text-xs font-bold rounded-lg shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                      title="Salin nominal tagihan"
+                    >
+                      {copiedAmount ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          <span className="text-emerald-700">Tersalin!</span>
+                        </>
                       ) : (
                         <>
-                          <Upload className="w-6 h-6 text-slate-400 mb-1" />
-                          <span className="text-xs font-semibold text-slate-700">
-                            Pilih Foto Struk / Tangkapan Layar M-Banking
-                          </span>
-                          <span className="text-[10px] text-slate-400 mt-0.5">
-                            Format JPG, PNG, atau WEBP (Maks 10MB)
-                          </span>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Salin Nominal</span>
                         </>
                       )}
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleFileUpload}
-                        className="hidden"
-                      />
-                    </label>
+                    </button>
+                  </div>
+
+                  {/* Official Formal Steps: Cara Pembayaran Transfer Bank */}
+                  <div className="p-4 bg-white border border-slate-200 rounded-xl text-left text-xs space-y-2.5">
+                    <span className="font-bold text-[#1E2927] block text-xs">Cara Pembayaran Transfer Bank:</span>
+                    <ol className="list-decimal list-inside space-y-1.5 text-slate-600 leading-relaxed text-[11px]">
+                      <li>Pilih salah satu rekening tujuan di atas (BCA atau CIMB NIAGA).</li>
+                      <li>Salin nomor rekening dan nominal tagihan yang harus ditransfer.</li>
+                      <li>Lakukan transfer manual melalui ATM, M-Banking, atau Internet Banking sesuai nominal yang tertera.</li>
+                      <li>Selesaikan transfer dan simpan tangkapan layar atau foto struk bukti pembayaran.</li>
+                      <li>Tekan tombol <strong>Kirim Bukti Pembayaran</strong> untuk menyimpan pesanan dan mengirimkan bukti transfer via WhatsApp ke admin POSSENSIOR.</li>
+                      <li>Pesanan Anda akan tercatat di sistem dan segera diproses setelah diverifikasi admin.</li>
+                    </ol>
+                  </div>
+
+                  {/* Action Button: Kirim Bukti Pembayaran */}
+                  <div className="mt-4 flex flex-col items-center gap-2 max-w-sm mx-auto">
+                    <button
+                      type="button"
+                      onClick={handleSendProofViaWhatsApp}
+                      disabled={isSubmitting}
+                      className="w-full py-3.5 bg-[#25D366] hover:bg-[#20ba59] text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99] disabled:opacity-50"
+                    >
+                      <MessageCircle className="w-4 h-4 fill-current" />
+                      <span>{isSubmitting ? 'Menyimpan Pesanan...' : 'Kirim Bukti Pembayaran'}</span>
+                    </button>
+
+                    <span className="text-[10px] text-slate-500 leading-tight">
+                      Setelah mengklik tombol di atas, Anda akan diarahkan ke WhatsApp admin (085777240570) untuk melampirkan bukti transfer. Pesanan Anda tetap tersimpan di database meskipun WhatsApp belum selesai.
+                    </span>
                   </div>
                 </div>
               )}
@@ -907,7 +928,7 @@ Saya melampirkan foto / tangkapan layar bukti transfer atau pembayaran QRIS pada
                       <div>
                         <span className="font-bold text-slate-800 line-clamp-1">{item.product.name}</span>
                         <span className="text-[11px] text-slate-400">
-                          {item.selectedSize} · {item.quantity} pcs
+                          {item.selectedSize} · {item.selectedColor} · {item.quantity} pcs
                         </span>
                       </div>
                     </div>
@@ -933,8 +954,8 @@ Saya melampirkan foto / tangkapan layar bukti transfer atau pembayaran QRIS pada
                 )}
 
                 <div className="flex justify-between text-slate-500">
-                  <span>Ongkos Kirim ({courier.toUpperCase()})</span>
-                  <span className="font-mono tabular-nums">{formatRupiah(shippingCost)}</span>
+                  <span>Biaya Lainnya (5% · Kurir {courier.toUpperCase()})</span>
+                  <span className="font-mono tabular-nums">{formatRupiah(otherFees)}</span>
                 </div>
 
                 <div className="flex justify-between text-sm font-extrabold text-[#1E2927] pt-2 border-t border-slate-200">
@@ -946,48 +967,22 @@ Saya melampirkan foto / tangkapan layar bukti transfer atau pembayaran QRIS pada
               </div>
 
               {/* Primary Action Button */}
-              {(() => {
-                const isMissingReceipt = paymentMethod === 'bank_transfer' && !uploadedProof;
-                const isButtonDisabled = isSubmitting || isMissingReceipt;
-
-                return (
-                  <div className="space-y-2">
-                    <button
-                      type="submit"
-                      disabled={isButtonDisabled}
-                      aria-disabled={isButtonDisabled}
-                      className={`w-full py-4 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 ${
-                        isButtonDisabled
-                          ? 'bg-slate-300 text-slate-500 cursor-not-allowed opacity-90 border border-slate-300 shadow-none pointer-events-none'
-                          : paymentMethod === 'qris'
-                            ? 'bg-[#25D366] hover:bg-[#20ba59] text-white shadow-md cursor-pointer active:scale-[0.99]'
-                            : 'bg-[#365E52] hover:bg-[#2A4B41] text-white shadow-md cursor-pointer active:scale-[0.99]'
-                      }`}
-                    >
-                      {isSubmitting ? (
-                        <span>Memproses Pesanan...</span>
-                      ) : paymentMethod === 'qris' ? (
-                        <>
-                          <MessageCircle className="w-4 h-4 fill-current" />
-                          <span>Kirim Bukti Pembayaran</span>
-                        </>
-                      ) : (
-                        <>
-                          <span>Bayar dan Konfirmasi</span>
-                          <Check className="w-4 h-4" />
-                        </>
-                      )}
-                    </button>
-
-                    {isMissingReceipt && (
-                      <div className="p-2.5 bg-amber-50 border border-amber-200 text-amber-800 text-[11px] rounded-xl flex items-center justify-center gap-1.5 font-medium text-center">
-                        <AlertCircle className="w-3.5 h-3.5 shrink-0 text-amber-600" />
-                        <span>Foto struk transfer wajib dilampirkan untuk mengaktifkan tombol ini</span>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
+              <div className="space-y-2">
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full py-4 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 bg-[#25D366] hover:bg-[#20ba59] text-white shadow-md cursor-pointer active:scale-[0.99] disabled:opacity-50"
+                >
+                  {isSubmitting ? (
+                    <span>Menyimpan ke Database...</span>
+                  ) : (
+                    <>
+                      <MessageCircle className="w-4 h-4 fill-current" />
+                      <span>Kirim Bukti Pembayaran</span>
+                    </>
+                  )}
+                </button>
+              </div>
 
               <div className="text-[11px] text-slate-400 text-center leading-relaxed">
                 Dengan mengonfirmasi pesanan, Anda menyetujui syarat & ketentuan pengembalian barang dan garansi penukaran size Possensior.

@@ -20,9 +20,12 @@ import {
   fetchProductsFromDatabase,
   saveProductToDatabase,
   deleteProductFromDatabase,
+  fetchOrdersFromDatabase,
+  updateOrderInDatabase,
   deleteOrderFromDatabase,
   migrateDefaultProductsToDatabase,
   isSupabaseConfigured,
+  sanitizeOrderRecord,
 } from './lib/supabase';
 
 export default function App() {
@@ -64,13 +67,19 @@ export default function App() {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [discountPercent, setDiscountPercent] = useState<number>(0);
 
-  // Orders State (Persisted in localStorage)
+  // Orders State (Persisted in localStorage with schema sanitization)
   const [orders, setOrders] = useState<Order[]>(() => {
     try {
       const saved = localStorage.getItem('possensior_orders');
-      return saved ? JSON.parse(saved) : INITIAL_ORDERS;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.map((o) => sanitizeOrderRecord(o));
+        }
+      }
+      return INITIAL_ORDERS.map((o) => sanitizeOrderRecord(o));
     } catch {
-      return INITIAL_ORDERS;
+      return INITIAL_ORDERS.map((o) => sanitizeOrderRecord(o));
     }
   });
 
@@ -235,17 +244,48 @@ export default function App() {
   };
 
   // Owner Operations (Synchronized with Supabase and localStorage)
-  const handleUpdateOrder = (updatedOrder: Order) => {
+  const handleRefreshOrders = async (): Promise<void> => {
+    try {
+      const { orders: dbOrders, error } = await fetchOrdersFromDatabase();
+      if (!error && dbOrders) {
+        setOrders(dbOrders);
+        try {
+          localStorage.setItem('possensior_orders', JSON.stringify(dbOrders));
+        } catch (e) {
+          console.error('Failed to update localStorage with DB orders', e);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to refresh orders from database', e);
+    }
+  };
+
+  const handleUpdateOrder = async (updatedOrder: Order) => {
     setOrders((prev) =>
       prev.map((o) => (o.id === updatedOrder.id ? updatedOrder : o))
     );
-    showToast(`Pesanan ${updatedOrder.invoiceNumber} diperbarui`);
+    try {
+      if (isSupabaseConfigured) {
+        const { error } = await updateOrderInDatabase(updatedOrder);
+        if (error) {
+          showToast(`Peringatan: Gagal memperbarui di database (${error})`);
+          return;
+        }
+      }
+      showToast(`Pesanan ${updatedOrder.invoiceNumber} diperbarui di database`);
+    } catch (err: any) {
+      console.error('Error updating order', err);
+    }
   };
 
   const handleDeleteOrder = async (orderId: string): Promise<boolean> => {
     try {
       if (isSupabaseConfigured) {
-        await deleteOrderFromDatabase(orderId);
+        const { error } = await deleteOrderFromDatabase(orderId);
+        if (error) {
+          alert(`Gagal menghapus pesanan dari database: ${error}`);
+          return false;
+        }
       }
       setOrders((prev) => {
         const updated = prev.filter((o) => o.id !== orderId);
@@ -680,6 +720,7 @@ export default function App() {
           onDeleteProduct={handleDeleteProduct}
           onMigrateDefaultProducts={handleMigrateDefaultProducts}
           onRefreshProducts={handleRefreshProducts}
+          onRefreshOrders={handleRefreshOrders}
           isDbConfigured={isSupabaseConfigured}
         />
       )}

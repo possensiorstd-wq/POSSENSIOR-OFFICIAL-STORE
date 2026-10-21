@@ -55,7 +55,7 @@ export const SingleReceiptPrintModal: React.FC<SingleReceiptPrintModalProps> = (
                 Cetak Resi: {order.invoiceNumber}
               </h3>
               <span className="text-[11px] text-slate-400">
-                Penerima: {order.shipping.fullName} ({order.shipping.city})
+                Penerima: {order.shipping?.fullName || 'Penerima'} ({order.shipping?.city || '-'})
               </span>
             </div>
           </div>

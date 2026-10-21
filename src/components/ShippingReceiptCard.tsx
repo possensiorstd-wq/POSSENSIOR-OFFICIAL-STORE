@@ -19,7 +19,18 @@ export const ShippingReceiptCard: React.FC<ShippingReceiptCardProps> = ({
     }).format(num);
   };
 
-  const totalQuantity = order.items.reduce((sum, item) => sum + item.quantity, 0);
+  const totalQuantity = (order.items || []).reduce((sum, item) => sum + item.quantity, 0);
+
+  const addressFormatted = [
+    order.shipping?.address,
+    order.shipping?.district ? `Kec. ${order.shipping.district}` : null,
+    order.shipping?.subdistrict ? `Kel. ${order.shipping.subdistrict}` : null,
+    order.shipping?.city,
+    order.shipping?.province,
+    order.shipping?.postalCode,
+  ]
+    .filter(Boolean)
+    .join(', ');
 
   return (
     <div
@@ -36,7 +47,7 @@ export const ShippingReceiptCard: React.FC<ShippingReceiptCardProps> = ({
         </div>
         <div className="text-right">
           <span className="text-sm font-black font-mono tracking-wider block">
-            {order.shipping.courier.toUpperCase()} EXPRESS
+            {(order.shipping?.courier || 'JNE').toUpperCase()} EXPRESS
           </span>
           <span className="text-[11px] text-slate-700 font-mono font-semibold">
             No. Resi: {order.courierResi || order.trackingNumber}
@@ -65,10 +76,10 @@ export const ShippingReceiptCard: React.FC<ShippingReceiptCardProps> = ({
         <div className="text-right">
           <span className="text-[10px] uppercase font-bold text-slate-500 block">Tujuan Pengiriman</span>
           <span className="text-base font-extrabold uppercase tracking-tight text-black font-mono">
-            {order.shipping.city}
+            {order.shipping?.city || 'Indonesia'}
           </span>
           <span className="text-[10px] font-mono block text-slate-600">
-            KODEPOS: {order.shipping.postalCode || '12190'}
+            KODEPOS: {order.shipping?.postalCode || '12190'}
           </span>
         </div>
       </div>
@@ -80,12 +91,12 @@ export const ShippingReceiptCard: React.FC<ShippingReceiptCardProps> = ({
           <span className="text-[10px] font-bold uppercase text-slate-600 block mb-0.5">
             Kepada (Penerima):
           </span>
-          <h4 className="font-extrabold text-sm text-black">{order.shipping.fullName}</h4>
-          <p className="font-mono font-semibold text-slate-800 mt-0.5">{order.shipping.phone}</p>
+          <h4 className="font-extrabold text-sm text-black">{order.shipping?.fullName || 'Penerima'}</h4>
+          <p className="font-mono font-semibold text-slate-800 mt-0.5">{order.shipping?.phone || '-'}</p>
           <p className="text-slate-800 mt-1 leading-relaxed text-xs">
-            {order.shipping.address}, {order.shipping.city} {order.shipping.province || ''} {order.shipping.postalCode}
+            {addressFormatted || '-'}
           </p>
-          {order.shipping.notes && (
+          {order.shipping?.notes && (
             <div className="text-[11px] text-black bg-slate-100 p-2 rounded mt-2 border border-slate-300 font-medium">
               <strong className="block text-[10px] uppercase text-slate-600">Catatan Pengiriman:</strong>
               {order.shipping.notes}
@@ -125,22 +136,22 @@ export const ShippingReceiptCard: React.FC<ShippingReceiptCardProps> = ({
             <span className="col-span-2 text-center">Qty</span>
             <span className="col-span-2 text-right">Subtotal</span>
           </div>
-          {order.items.map((item) => (
+          {(order.items || []).map((item) => (
             <div key={item.id} className="p-2.5 grid grid-cols-12 items-center bg-white text-xs">
               <div className="col-span-6">
-                <span className="font-bold text-black block">{item.product.name}</span>
+                <span className="font-bold text-black block">{item.product?.name || 'Apparel Possensior'}</span>
                 <span className="text-slate-600 text-[11px]">
                   Size: {item.selectedSize} · Warna: {item.selectedColor}
                 </span>
               </div>
               <span className="col-span-2 text-center font-mono text-slate-700">
-                {formatRupiah(item.product.price)}
+                {formatRupiah(item.product?.price || 0)}
               </span>
               <span className="col-span-2 text-center font-mono font-bold text-black">
                 {item.quantity} pcs
               </span>
               <span className="col-span-2 text-right font-mono font-bold text-black">
-                {formatRupiah(item.product.price * item.quantity)}
+                {formatRupiah((item.product?.price || 0) * item.quantity)}
               </span>
             </div>
           ))}
@@ -154,7 +165,7 @@ export const ShippingReceiptCard: React.FC<ShippingReceiptCardProps> = ({
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] font-semibold">Status Pesanan:</span>
               <span className="font-bold uppercase text-black bg-slate-100 px-2 py-0.5 rounded border border-slate-200 text-[10px]">
-                {order.paymentStatus.replace('_', ' ')}
+                {(order.paymentStatus || 'menunggu_pembayaran').replace('_', ' ')}
               </span>
             </div>
             <div className="text-[11px]">
@@ -162,8 +173,13 @@ export const ShippingReceiptCard: React.FC<ShippingReceiptCardProps> = ({
               <strong className="uppercase text-black">
                 {order.paymentMethod === 'qris'
                   ? 'QRIS Manual (Scan QR)'
-                  : `Transfer Bank (${order.selectedBank?.name || 'Manual'})`}
+                  : `Transfer Bank (${order.selectedBank?.name || 'BCA / CIMB'})`}
               </strong>
+              {order.selectedBank && (
+                <div className="text-[10px] text-slate-600 font-mono mt-0.5">
+                  Rek: {order.selectedBank.accountNumber} ({order.selectedBank.accountHolder})
+                </div>
+              )}
             </div>
             <div className="text-[10px] text-slate-500 font-mono">
               Resi Pengiriman Resmi POSSENSIOR
@@ -176,8 +192,8 @@ export const ShippingReceiptCard: React.FC<ShippingReceiptCardProps> = ({
               <span className="font-semibold text-black">{formatRupiah(order.subtotal)}</span>
             </div>
             <div className="flex justify-between text-slate-600 text-xs">
-              <span>Biaya Kirim ({order.shipping.courier.toUpperCase()}):</span>
-              <span className="font-semibold text-black">{formatRupiah(order.shippingCost)}</span>
+              <span>Biaya Lainnya (5%):</span>
+              <span className="font-semibold text-black">{formatRupiah(order.otherFees || order.shippingCost || 0)}</span>
             </div>
             {order.discount > 0 && (
               <div className="flex justify-between text-emerald-700 text-xs">

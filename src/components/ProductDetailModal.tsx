@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Product, ProductSize } from '../types/store';
-import { X, Check, ShoppingBag, ShieldCheck, Truck, Ruler, Palette } from 'lucide-react';
+import { X, Check, ShoppingBag, ShieldCheck, Truck, Ruler, Palette, ChevronLeft, ChevronRight } from 'lucide-react';
 import { SIZE_CHART } from '../data/products';
 import { PossensiorIcon } from './Logos';
 
@@ -66,7 +66,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   onAddToCart,
   onBuyNow,
 }) => {
-  const [activeImage, setActiveImage] = useState(product?.image || '');
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [availableColors, setAvailableColors] = useState<{ name: string; hex: string }[]>([]);
   const [selectedColor, setSelectedColor] = useState('Standard');
   const [selectedSize, setSelectedSize] = useState<ProductSize>('L');
@@ -74,10 +74,22 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   const [showSizeGuide, setShowSizeGuide] = useState(false);
   const [imageError, setImageError] = useState(false);
 
+  // Swipe detection refs
+  const touchStartXRef = useRef<number | null>(null);
+  const touchStartYRef = useRef<number | null>(null);
+  const touchEndXRef = useRef<number | null>(null);
+  const touchEndYRef = useRef<number | null>(null);
+
+  const allImages = useMemo(() => {
+    if (!product) return [];
+    const list = [product.image, ...(product.additionalImages || [])].filter(Boolean);
+    return list.length > 0 ? list : ['/placeholder.png'];
+  }, [product]);
+
   // Synchronize strictly with the product's saved data — NO auto-extracted image colors
   useEffect(() => {
     if (!product) return;
-    setActiveImage(product.image);
+    setActiveImageIndex(0);
     setImageError(false);
 
     // 1. Colors strictly from product.colors without duplicates or artificial image analysis
@@ -91,16 +103,18 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     setSelectedSize(sizes[0] || 'L');
   }, [product]);
 
-  const activeSizeChart = React.useMemo(() => {
+  const activeSizeChart = useMemo(() => {
     if (!product) return [];
     return getProductSizeChart(product);
   }, [product]);
 
-  const availableSizes = React.useMemo(() => {
+  const availableSizes = useMemo(() => {
     return activeSizeChart.map((r) => r.size);
   }, [activeSizeChart]);
 
   if (!isOpen || !product) return null;
+
+  const currentImage = allImages[activeImageIndex] || product.image;
 
   const formatRupiah = (num: number) => {
     return new Intl.NumberFormat('id-ID', {
@@ -118,63 +132,184 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     onBuyNow(product, selectedSize, selectedColor, quantity);
   };
 
-  const allImages = [product.image, ...(product.additionalImages || [])].filter(Boolean);
-
   const handleColorSelect = (colorName: string, colorIndex: number) => {
     setSelectedColor(colorName);
     if (allImages[colorIndex]) {
-      setActiveImage(allImages[colorIndex]);
+      setActiveImageIndex(colorIndex);
       setImageError(false);
     }
+  };
+
+  // Touch Swipe handlers for horizontal navigation
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (allImages.length <= 1) return;
+    const touch = e.touches[0];
+    touchStartXRef.current = touch.clientX;
+    touchStartYRef.current = touch.clientY;
+    touchEndXRef.current = touch.clientX;
+    touchEndYRef.current = touch.clientY;
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (allImages.length <= 1 || touchStartXRef.current === null) return;
+    const touch = e.touches[0];
+    touchEndXRef.current = touch.clientX;
+    touchEndYRef.current = touch.clientY;
+  };
+
+  const handleTouchEnd = () => {
+    if (
+      allImages.length <= 1 ||
+      touchStartXRef.current === null ||
+      touchEndXRef.current === null ||
+      touchStartYRef.current === null ||
+      touchEndYRef.current === null
+    ) {
+      touchStartXRef.current = null;
+      touchStartYRef.current = null;
+      touchEndXRef.current = null;
+      touchEndYRef.current = null;
+      return;
+    }
+
+    const diffX = touchStartXRef.current - touchEndXRef.current;
+    const diffY = touchStartYRef.current - touchEndYRef.current;
+
+    // Only trigger horizontal swipe when horizontal distance > vertical distance
+    // and horizontal difference exceeds minimum threshold of 40px
+    if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 40) {
+      if (diffX > 0) {
+        // Swiped left -> Next photo
+        setActiveImageIndex((prev) => (prev + 1) % allImages.length);
+        setImageError(false);
+      } else {
+        // Swiped right -> Previous photo
+        setActiveImageIndex((prev) => (prev - 1 + allImages.length) % allImages.length);
+        setImageError(false);
+      }
+    }
+
+    touchStartXRef.current = null;
+    touchStartYRef.current = null;
+    touchEndXRef.current = null;
+    touchEndYRef.current = null;
   };
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200">
       <div 
-        className="relative bg-white rounded-3xl max-w-4xl w-full shadow-2xl overflow-hidden border border-slate-200 flex flex-col md:flex-row max-h-[92vh]"
+        className="relative bg-white rounded-3xl max-w-4xl w-full shadow-2xl overflow-y-auto md:overflow-hidden border border-slate-200 flex flex-col md:flex-row max-h-[92vh] my-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Close Button */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 z-20 w-9 h-9 bg-white/90 hover:bg-slate-100 text-slate-700 rounded-full flex items-center justify-center transition-colors shadow-xs cursor-pointer"
+          className="absolute top-3 right-3 sm:top-4 sm:right-4 z-20 w-9 h-9 bg-white/90 hover:bg-slate-100 text-slate-700 rounded-full flex items-center justify-center transition-colors shadow-xs cursor-pointer"
           aria-label="Tutup detail produk"
         >
           <X className="w-5 h-5" />
         </button>
 
         {/* Left Column: Product Image Gallery */}
-        <div className="md:w-1/2 bg-stone-100 relative min-h-[300px] md:min-h-full flex flex-col items-center justify-center p-4">
-          <div className="w-full flex-1 flex items-center justify-center">
+        <div className="md:w-1/2 bg-stone-100/90 relative flex flex-col items-center justify-between p-3 sm:p-5 select-none shrink-0 border-b md:border-b-0 md:border-r border-slate-200">
+          <div
+            className="w-full relative flex-1 min-h-[260px] xs:min-h-[290px] sm:min-h-[340px] md:min-h-[420px] max-h-[50vh] md:max-h-[500px] flex items-center justify-center overflow-hidden rounded-2xl touch-pan-y"
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+          >
             {!imageError ? (
               <img
-                src={activeImage}
-                alt={product.name}
+                src={currentImage}
+                alt={`${product.name} - foto ${activeImageIndex + 1}`}
                 referrerPolicy="no-referrer"
                 onError={() => setImageError(true)}
-                className="w-full h-full max-h-[460px] object-cover object-center rounded-2xl shadow-xs"
+                className="w-full h-full max-h-[260px] xs:max-h-[290px] sm:max-h-[340px] md:max-h-[460px] object-contain object-center rounded-2xl drop-shadow-xs transition-opacity duration-200"
               />
             ) : (
-              <div className="w-full h-full min-h-[300px] flex flex-col items-center justify-center bg-gradient-to-br from-[#EAEFEA] to-[#D5E1DC] p-8 text-center rounded-2xl">
-                <PossensiorIcon className="w-24 h-24 text-[#365E52] opacity-80 mb-3" color="#365E52" />
+              <div className="w-full h-full min-h-[260px] flex flex-col items-center justify-center bg-gradient-to-br from-[#EAEFEA] to-[#D5E1DC] p-8 text-center rounded-2xl">
+                <PossensiorIcon className="w-20 h-20 text-[#365E52] opacity-80 mb-3" color="#365E52" />
                 <span className="text-sm font-bold text-[#365E52] uppercase tracking-wider">{product.name}</span>
                 <span className="text-xs text-slate-500 mt-1">{product.material}</span>
               </div>
             )}
+
+            {/* Navigation Chevrons when multiple photos exist */}
+            {allImages.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveImageIndex((prev) => (prev - 1 + allImages.length) % allImages.length);
+                    setImageError(false);
+                  }}
+                  className="absolute left-2 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-white/85 hover:bg-white text-slate-700 shadow-md flex items-center justify-center cursor-pointer transition-all active:scale-95"
+                  aria-label="Foto sebelumnya"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveImageIndex((prev) => (prev + 1) % allImages.length);
+                    setImageError(false);
+                  }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-white/85 hover:bg-white text-slate-700 shadow-md flex items-center justify-center cursor-pointer transition-all active:scale-95"
+                  aria-label="Foto berikutnya"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </>
+            )}
+
+            {/* Photo Index Badge (e.g. 1/3) */}
+            {allImages.length > 1 && (
+              <div className="absolute bottom-3 right-3 bg-black/60 backdrop-blur-xs text-white text-[11px] font-mono font-medium px-2.5 py-0.5 rounded-full pointer-events-none">
+                {activeImageIndex + 1} / {allImages.length}
+              </div>
+            )}
           </div>
+
+          {/* Dots indicator for mobile */}
+          {allImages.length > 1 && (
+            <div className="flex md:hidden items-center justify-center gap-1.5 mt-2">
+              {allImages.map((_, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => {
+                    setActiveImageIndex(idx);
+                    setImageError(false);
+                  }}
+                  className={`h-1.5 rounded-full transition-all cursor-pointer ${
+                    activeImageIndex === idx ? 'w-5 bg-[#365E52]' : 'w-1.5 bg-slate-300'
+                  }`}
+                  aria-label={`Lihat foto ${idx + 1}`}
+                />
+              ))}
+            </div>
+          )}
 
           {/* Additional detail thumbnails */}
           {allImages.length > 1 && (
-            <div className="mt-3 flex items-center gap-2 overflow-x-auto max-w-full pb-1">
+            <div className="mt-2.5 flex items-center gap-2 overflow-x-auto max-w-full pb-1 px-1">
               {allImages.map((img, idx) => (
                 <button
                   key={idx}
-                  onClick={() => setActiveImage(img)}
-                  className={`w-12 h-12 rounded-xl overflow-hidden border-2 transition-all shrink-0 cursor-pointer ${
-                    activeImage === img ? 'border-[#365E52] ring-2 ring-[#365E52]/20' : 'border-white opacity-70 hover:opacity-100'
+                  type="button"
+                  onClick={() => {
+                    setActiveImageIndex(idx);
+                    setImageError(false);
+                  }}
+                  className={`w-11 h-11 sm:w-12 sm:h-12 rounded-xl overflow-hidden border-2 transition-all shrink-0 cursor-pointer ${
+                    activeImageIndex === idx
+                      ? 'border-[#365E52] ring-2 ring-[#365E52]/20 scale-105'
+                      : 'border-white opacity-70 hover:opacity-100'
                   }`}
                 >
-                  <img src={img} alt="Thumbnail" className="w-full h-full object-cover" />
+                  <img src={img} alt={`Thumbnail ${idx + 1}`} className="w-full h-full object-cover" />
                 </button>
               ))}
             </div>
@@ -182,14 +317,14 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 
           {/* Special collection badge */}
           {product.tag && (
-            <div className="absolute top-6 left-6 bg-[#365E52] text-white text-xs font-semibold py-1 px-3 rounded-md shadow-sm">
+            <div className="absolute top-4 left-4 bg-[#365E52] text-white text-[11px] font-semibold py-1 px-2.5 rounded-md shadow-xs pointer-events-none">
               {product.tag}
             </div>
           )}
         </div>
 
         {/* Right Column: Contiguous Purchase Module */}
-        <div className="md:w-1/2 p-6 sm:p-8 flex flex-col justify-between overflow-y-auto">
+        <div className="md:w-1/2 p-5 sm:p-8 flex flex-col justify-between md:overflow-y-auto">
           <div>
             {/* Category and Fit Metadata */}
             <div className="flex items-center gap-2 text-xs text-slate-500 mb-1.5">

@@ -67,7 +67,7 @@ export const ContactModal: React.FC<ContactModalProps> = ({ isOpen, onClose }) =
 
           {/* WhatsApp / Customer Support */}
           <a
-            href="https://wa.me/6281234567890?text=Halo%20Possensior%2C%20saya%20ingin%20bertanya%20seputar%20produk%20dan%20pesanan"
+            href="https://wa.me/6285777240570?text=Halo%20Possensior%2C%20saya%20ingin%20bertanya%20seputar%20produk%20dan%20pesanan"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-3.5 p-3.5 rounded-xl border border-slate-200 hover:border-[#365E52] hover:bg-[#365E52]/5 transition-all text-slate-700 group cursor-pointer"
@@ -77,7 +77,7 @@ export const ContactModal: React.FC<ContactModalProps> = ({ isOpen, onClose }) =
             </div>
             <div className="flex-1">
               <div className="font-bold text-slate-900 group-hover:text-[#365E52]">WhatsApp Customer Care</div>
-              <div className="text-slate-500 text-[11px]">+62 812-3456-7890 (09.00 - 21.00 WIB)</div>
+              <div className="text-slate-500 text-[11px]">+62 857-7724-0570 (09.00 - 21.00 WIB)</div>
             </div>
           </a>
 

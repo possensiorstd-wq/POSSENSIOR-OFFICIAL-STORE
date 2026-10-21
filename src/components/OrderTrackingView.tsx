@@ -182,13 +182,22 @@ export const OrderTrackingView: React.FC<OrderTrackingViewProps> = ({
                     <MapPin className="w-3.5 h-3.5 text-[#365E52]" />
                     <span>Penerima & Alamat</span>
                   </h5>
-                  <p className="text-xs font-bold text-[#1E2927]">{searchedOrder.shipping.fullName}</p>
-                  <p className="text-xs text-slate-600 mt-0.5">{searchedOrder.shipping.phone}</p>
+                  <p className="text-xs font-bold text-[#1E2927]">{searchedOrder.shipping?.fullName || 'Penerima'}</p>
+                  <p className="text-xs text-slate-600 mt-0.5">{searchedOrder.shipping?.phone || '-'}</p>
                   <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                    {searchedOrder.shipping.address}, {searchedOrder.shipping.city} {searchedOrder.shipping.postalCode}
+                    {[
+                      searchedOrder.shipping?.address,
+                      searchedOrder.shipping?.district ? `Kec. ${searchedOrder.shipping.district}` : null,
+                      searchedOrder.shipping?.subdistrict ? `Kel. ${searchedOrder.shipping.subdistrict}` : null,
+                      searchedOrder.shipping?.city,
+                      searchedOrder.shipping?.province,
+                      searchedOrder.shipping?.postalCode,
+                    ]
+                      .filter(Boolean)
+                      .join(', ')}
                   </p>
                   <div className="mt-2 text-xs font-semibold text-[#365E52]">
-                    Kurir: {searchedOrder.shipping.courier.toUpperCase()}
+                    Kurir: {(searchedOrder.shipping?.courier || 'JNE').toUpperCase()}
                   </div>
                 </div>
 
@@ -198,16 +207,16 @@ export const OrderTrackingView: React.FC<OrderTrackingViewProps> = ({
                     <span>Produk Dipesan</span>
                   </h5>
                   <div className="space-y-2">
-                    {searchedOrder.items.map((it) => (
+                    {(searchedOrder.items || []).map((it) => (
                       <div key={it.id} className="flex justify-between items-center text-xs">
                         <div>
-                          <span className="font-bold text-slate-800 line-clamp-1">{it.product.name}</span>
+                          <span className="font-bold text-slate-800 line-clamp-1">{it.product?.name || 'Apparel'}</span>
                           <span className="text-[11px] text-slate-400">
                             {it.selectedSize} · {it.quantity} pcs
                           </span>
                         </div>
                         <span className="font-mono font-semibold text-slate-700">
-                          {formatRupiah(it.product.price * it.quantity)}
+                          {formatRupiah((it.product?.price || 0) * it.quantity)}
                         </span>
                       </div>
                     ))}

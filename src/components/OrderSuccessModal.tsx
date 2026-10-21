@@ -106,7 +106,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
         <div className="text-xs text-slate-600 bg-slate-50/60 p-3 rounded-xl border border-slate-100 text-left space-y-1.5 mb-6">
           <div className="flex justify-between">
             <span className="text-slate-500">Penerima:</span>
-            <span className="font-semibold text-slate-800">{order.shipping.fullName}</span>
+            <span className="font-semibold text-slate-800">{order.shipping?.fullName || 'Penerima'}</span>
           </div>
           <div className="flex justify-between">
             <span className="text-slate-500">Metode Bayar:</span>
