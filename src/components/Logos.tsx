@@ -1,4 +1,5 @@
 import React from 'react';
+import greenLogo from '../assets/images/GREEN LOGO.png';
 
 interface LogoProps {
   className?: string;
@@ -8,24 +9,26 @@ interface LogoProps {
 
 /**
  * Possensior Stylized "P" Emblem
- * Recreated with exact bezier geometry matching the original "GREEN LOGO.png"
+ * Uses GREEN LOGO.png
  */
-import possensiorLogo from './assets/GREEN LOGO.png';
+export const PossensiorIcon: React.FC<LogoProps> = ({
   className = 'w-32 h-32',
   color = '#365E52',
+  size,
 }) => {
   return (
     <img
-    src="/src/assets/GREEN LOGO.png"
-    alt="Possensior Emblem"
-    className={className}
-    style={{
-      width: size,
-      height: size,
-      objectFit: 'contain',
-    }}
-  />
-);
+      src={greenLogo}
+      alt="Possensior Emblem"
+      className={className}
+      style={{
+        width: size,
+        height: size,
+        objectFit: 'contain',
+      }}
+    />
+  );
+};
 
 /**
  * Possensior Wordmark Logo
