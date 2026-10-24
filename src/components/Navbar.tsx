@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import homeHeaderLogo from '../assets/images/HOME HEADER LOGO.png';
-import { ShoppingBag, Search, Menu, X, ArrowLeft, Info, PhoneCall } from 'lucide-react';
+import { ShoppingBag, Search, Menu, X, ArrowLeft, Info, PhoneCall, Image as ImageIcon } from 'lucide-react';
 
 interface NavbarProps {
   cartCount: number;
   onOpenCart: () => void;
   onNavigateTracking: () => void;
+  onNavigateLookbook: () => void;
   onOpenContact: () => void;
   onOpenAbout: () => void;
   onBackToLanding: () => void;
@@ -17,6 +18,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   cartCount,
   onOpenCart,
   onNavigateTracking,
+  onNavigateLookbook,
   onOpenContact,
   onOpenAbout,
   onBackToLanding,
@@ -43,7 +45,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
         </div>
 
-        {/* Zone 2: Navigation Links: Kontak, About Us, Cek Resi */}
+        {/* Zone 2: Navigation Links: Kontak, About Us, Lookbook, Cek Resi */}
         <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-600">
           <button
             onClick={onOpenContact}
@@ -57,6 +59,17 @@ export const Navbar: React.FC<NavbarProps> = ({
             className="whitespace-nowrap shrink-0 hover:text-[#365E52] transition-colors cursor-pointer py-1"
           >
             About Us
+          </button>
+
+          <button
+            onClick={onNavigateLookbook}
+            className={`whitespace-nowrap shrink-0 transition-colors cursor-pointer py-1 ${
+              currentView === 'lookbook'
+                ? 'text-[#365E52] font-bold border-b-2 border-[#365E52]'
+                : 'hover:text-[#365E52]'
+            }`}
+          >
+            Lookbook
           </button>
 
           <button
@@ -126,6 +139,19 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           <button
             onClick={() => {
+              onNavigateLookbook();
+              setMobileMenuOpen(false);
+            }}
+            className={`text-left py-2 text-sm font-semibold flex items-center gap-2 ${
+              currentView === 'lookbook' ? 'text-[#365E52]' : 'text-slate-800 hover:text-[#365E52]'
+            }`}
+          >
+            <ImageIcon className="w-4 h-4 text-[#365E52]" />
+            <span>Lookbook</span>
+          </button>
+
+          <button
+            onClick={() => {
               onNavigateTracking();
               setMobileMenuOpen(false);
             }}
@@ -134,6 +160,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <Search className="w-4 h-4" />
             <span>Cek Resi</span>
           </button>
+
 
           <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
             <button

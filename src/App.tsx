@@ -9,6 +9,7 @@ import { ProductDetailModal } from './components/ProductDetailModal';
 import { CartDrawer } from './components/CartDrawer';
 import { CheckoutView } from './components/CheckoutView';
 import { OrderTrackingView } from './components/OrderTrackingView';
+import { LookbookView } from './components/LookbookView';
 import { OrderSuccessModal } from './components/OrderSuccessModal';
 import { ContactModal } from './components/ContactModal';
 import { AboutModal } from './components/AboutModal';
@@ -29,8 +30,8 @@ import {
 } from './lib/supabase';
 
 export default function App() {
-  // Navigation View: 'landing' | 'home' | 'checkout' | 'tracking'
-  const [currentView, setCurrentView] = useState<'landing' | 'home' | 'checkout' | 'tracking'>('landing');
+  // Navigation View: 'landing' | 'home' | 'checkout' | 'tracking' | 'lookbook'
+  const [currentView, setCurrentView] = useState<'landing' | 'home' | 'checkout' | 'tracking' | 'lookbook'>('landing');
   const [currentCategory, setCurrentCategory] = useState<ProductCategory>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState<'featured' | 'price-asc' | 'price-desc'>('featured');
@@ -154,6 +155,43 @@ export default function App() {
     setTimeout(() => {
       setToastMessage(null);
     }, 2800);
+  };
+
+  // Sync URL hash with currentView for native browser back/forward button support
+  useEffect(() => {
+    const handleUrlChange = () => {
+      const hash = window.location.hash.replace('#', '').toLowerCase();
+      if (hash === 'lookbook') {
+        setCurrentView('lookbook');
+      } else if (hash === 'tracking') {
+        setCurrentView('tracking');
+      } else if (hash === 'checkout') {
+        setCurrentView('checkout');
+      } else if (hash === 'home' || hash === 'katalog') {
+        setCurrentView('home');
+      } else if (hash === 'landing') {
+        setCurrentView('landing');
+      }
+    };
+
+    window.addEventListener('popstate', handleUrlChange);
+    window.addEventListener('hashchange', handleUrlChange);
+    if (window.location.hash) {
+      handleUrlChange();
+    }
+    return () => {
+      window.removeEventListener('popstate', handleUrlChange);
+      window.removeEventListener('hashchange', handleUrlChange);
+    };
+  }, []);
+
+  const navigateTo = (view: 'landing' | 'home' | 'checkout' | 'tracking' | 'lookbook') => {
+    setCurrentView(view);
+    const targetHash = view === 'landing' ? '' : `#${view}`;
+    if (window.location.hash !== targetHash) {
+      window.history.pushState(null, '', targetHash || window.location.pathname);
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // Cart operations
@@ -447,24 +485,16 @@ export default function App() {
             transition={{ duration: 0.3 }}
             className="flex-1 flex flex-col"
           >
-            {/* Header Navbar with Kontak, About Us, Cek Resi & Icon-Only Cart */}
+            {/* Header Navbar with Kontak, About Us, Lookbook, Cek Resi & Icon-Only Cart */}
             <Navbar
               cartCount={cartTotalCount}
               onOpenCart={() => setIsCartOpen(true)}
-              onNavigateTracking={() => {
-                setCurrentView('tracking');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
+              onNavigateTracking={() => navigateTo('tracking')}
+              onNavigateLookbook={() => navigateTo('lookbook')}
               onOpenContact={() => setIsContactOpen(true)}
               onOpenAbout={() => setIsAboutOpen(true)}
-              onBackToLanding={() => {
-                setCurrentView('landing');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
-              onGoHome={() => {
-                setCurrentView('home');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
+              onBackToLanding={() => navigateTo('landing')}
+              onGoHome={() => navigateTo('home')}
               currentView={currentView}
             />
 
@@ -636,6 +666,20 @@ export default function App() {
                         setCurrentView('home');
                         window.scrollTo({ top: 0, behavior: 'smooth' });
                       }}
+                    />
+                  </motion.div>
+                )}
+
+                {currentView === 'lookbook' && (
+                  <motion.div
+                    key="lookbook-view"
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.25 }}
+                  >
+                    <LookbookView
+                      onBackToStore={() => navigateTo('home')}
                     />
                   </motion.div>
                 )}

@@ -1,7 +1,8 @@
-import React, { useEffect } from 'react';
+import React, { useRef } from 'react';
 import { Order } from '../types/store';
-import { Printer, X, AlertCircle } from 'lucide-react';
+import { Printer, X } from 'lucide-react';
 import { ShippingReceiptCard } from './ShippingReceiptCard';
+import { printReceiptElement } from '../utils/printReceipts';
 
 interface SingleReceiptPrintModalProps {
   isOpen: boolean;
@@ -14,32 +15,22 @@ export const SingleReceiptPrintModal: React.FC<SingleReceiptPrintModalProps> = (
   onClose,
   order,
 }) => {
+  const printAreaRef = useRef<HTMLDivElement>(null);
+
   if (!isOpen || !order) return null;
 
   const handlePrint = () => {
     try {
-      window.print();
+      if (printAreaRef.current) {
+        printReceiptElement(printAreaRef.current, `Resi-${order.invoiceNumber}`);
+      } else {
+        window.print();
+      }
     } catch (err: any) {
       console.error('Print dialog failed', err);
-      alert(
-        `Gagal membuka dialog cetak browser: ${err?.message || 'Akses cetak dibatasi oleh pengaturan browser.'}`
-      );
+      window.print();
     }
   };
-
-  // Automatically trigger window.print() once the modal renders the receipt
-  useEffect(() => {
-    if (isOpen && order) {
-      const timer = setTimeout(() => {
-        try {
-          window.print();
-        } catch (err: any) {
-          console.error('Auto print trigger failed', err);
-        }
-      }, 200);
-      return () => clearTimeout(timer);
-    }
-  }, [isOpen, order]);
 
   return (
     <div className="print-modal-backdrop fixed inset-0 z-60 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-150">
@@ -93,7 +84,7 @@ export const SingleReceiptPrintModal: React.FC<SingleReceiptPrintModalProps> = (
         </div>
 
         {/* Dedicated Printable Area: only this order's card is rendered */}
-        <div className="possensior-print-zone flex-1 overflow-y-auto p-6 bg-slate-100 print:bg-white print:p-0">
+        <div ref={printAreaRef} className="possensior-print-zone flex-1 overflow-y-auto p-6 bg-slate-100 print:bg-white print:p-0">
           <ShippingReceiptCard order={order} />
         </div>
       </div>

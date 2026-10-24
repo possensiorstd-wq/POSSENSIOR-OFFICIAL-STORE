@@ -100,3 +100,15 @@ export interface Order {
     current?: boolean;
   }[];
 }
+
+export interface LookbookItem {
+  id: string;
+  title?: string;
+  description?: string;
+  image_path?: string;
+  image_url: string;
+  sort_order?: number;
+  created_at?: string | null;
+  season?: string;
+}
+

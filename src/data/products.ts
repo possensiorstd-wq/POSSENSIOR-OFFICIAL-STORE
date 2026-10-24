@@ -210,9 +210,14 @@ export const SIZE_CHART = [
   { size: 'XL', chest: '63 cm', length: '77 cm', shoulder: '61 cm', sleeve: '25 cm' },
 ];
 
+// Authentic Supabase Storage URL for POSSENSIOR QRIS (POSSENSIOR MEDIA/payment/QRIS MANUAL.jpeg)
+export const SUPABASE_PAYMENT_QRIS_URL =
+  'https://jbmatfxurfiojsqtxjdd.supabase.co/storage/v1/object/public/POSSENSIOR%20MEDIA/payment/QRIS%20MANUAL.jpeg';
+
 export const QRIS_MANUAL_CONFIG = {
-  image: '/src/assets/images/qris_manual.png',
+  image: SUPABASE_PAYMENT_QRIS_URL,
   adminWhatsApp: '6285777240570',
   storeName: 'POSSENSIOR OFFICIAL',
   nmid: 'ID102003928103',
 };
+

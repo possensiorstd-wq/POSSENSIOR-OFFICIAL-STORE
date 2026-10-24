@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Product, Order, ShippingInfo } from '../types/store';
+import { Product, Order, ShippingInfo, LookbookItem } from '../types/store';
 
 /**
  * Exact name of the pre-created Supabase Storage Bucket.
@@ -844,3 +844,255 @@ export async function checkStorageBucketStatus(): Promise<{
     };
   }
 }
+
+/**
+ * Supabase table name for Lookbook metadata.
+ */
+export const LOOKBOOK_TABLE = 'possensior_lookbook';
+
+/**
+ * Storage subfolder within "POSSENSIOR MEDIA" designated for Lookbook imagery.
+ */
+export const LOOKBOOK_FOLDER = 'lookbook';
+
+/**
+ * Resolves a storage relative path or full URL to a valid public Supabase Storage URL.
+ */
+export function resolveLookbookImageUrl(pathOrUrl?: string): string {
+  if (!pathOrUrl || typeof pathOrUrl !== 'string') return '';
+  const trimmed = pathOrUrl.trim();
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed;
+  }
+  // If it's a relative storage path (e.g., "lookbook/foto.jpg" or "foto.jpg")
+  const normalizedPath = trimmed.startsWith('lookbook/')
+    ? trimmed
+    : `lookbook/${trimmed.replace(/^\/+/, '')}`;
+
+  if (!isSupabaseConfigured) return '';
+  const { data } = supabase.storage.from(STORAGE_BUCKET_NAME).getPublicUrl(normalizedPath);
+  return data?.publicUrl || '';
+}
+
+/**
+ * Fetches Lookbook items from Supabase.
+ * Dual-strategy:
+ * 1. Checks public.possensior_lookbook table sorted by sort_order ASC, created_at DESC.
+ * 2. If table is empty or pending SQL execution, seamlessly reads from "POSSENSIOR MEDIA/lookbook/" storage folder.
+ */
+export async function fetchLookbookItems(): Promise<{
+  items: LookbookItem[];
+  source: 'database' | 'storage' | 'empty';
+  error: string | null;
+}> {
+  if (!isSupabaseConfigured) {
+    return {
+      items: [],
+      source: 'empty',
+      error: 'Supabase belum terkonfigurasi pada environment.',
+    };
+  }
+
+  try {
+    // 1. Attempt fetching from possensior_lookbook metadata table
+    const { data: dbRows, error: dbError } = await supabase
+      .from(LOOKBOOK_TABLE)
+      .select('*')
+      .order('sort_order', { ascending: true, nullsFirst: false });
+
+    // If query succeeded and returned rows, map them
+    if (!dbError && dbRows && dbRows.length > 0) {
+      const parsed: LookbookItem[] = dbRows.map((row: any) => {
+        const rawPath = row.image_path || row.image_url || row.image || '';
+        const resolvedUrl = resolveLookbookImageUrl(rawPath);
+        return {
+          id: String(row.id || `lookbook-${Date.now()}`),
+          title: row.title || row.name || undefined,
+          description: row.description || undefined,
+          season: row.season || undefined,
+          image_path: rawPath,
+          image_url: resolvedUrl || rawPath,
+          sort_order: typeof row.sort_order === 'number' ? row.sort_order : 0,
+          created_at: row.created_at,
+        };
+      });
+
+      return { items: parsed, source: 'database', error: null };
+    }
+
+    // 2. Fallback / Direct storage check if table is empty or table doesn't exist yet
+    const { data: storageFiles, error: storageError } = await supabase.storage
+      .from(STORAGE_BUCKET_NAME)
+      .list(LOOKBOOK_FOLDER, {
+        limit: 100,
+        sortBy: { column: 'name', order: 'asc' },
+      });
+
+    if (storageError) {
+      // If table failed and storage also failed
+      return {
+        items: [],
+        source: 'empty',
+        error: dbError ? dbError.message : storageError.message,
+      };
+    }
+
+    if (storageFiles && storageFiles.length > 0) {
+      // Filter out folder placeholders and hidden files
+      const validFiles = storageFiles.filter(
+        (f) =>
+          f.name &&
+          !f.name.startsWith('.') &&
+          !f.name.includes('.emptyFolderPlaceholder') &&
+          /\.(jpg|jpeg|png|webp|avif)$/i.test(f.name)
+      );
+
+      if (validFiles.length > 0) {
+        const mappedItems: LookbookItem[] = validFiles.map((file, idx) => {
+          const filePath = `${LOOKBOOK_FOLDER}/${file.name}`;
+          const { data } = supabase.storage.from(STORAGE_BUCKET_NAME).getPublicUrl(filePath);
+          // Prettify filename as fallback title if appropriate
+          const cleanTitle = file.name
+            .replace(/\.[^/.]+$/, '')
+            .replace(/[-_]+/g, ' ')
+            .trim();
+
+          return {
+            id: file.id || `storage-${file.name}-${idx}`,
+            title: cleanTitle ? cleanTitle.toUpperCase() : undefined,
+            image_path: filePath,
+            image_url: data.publicUrl,
+            sort_order: idx + 1,
+            created_at: file.created_at,
+          };
+        });
+
+        return { items: mappedItems, source: 'storage', error: null };
+      }
+    }
+
+    return { items: [], source: 'empty', error: null };
+  } catch (err: any) {
+    return {
+      items: [],
+      source: 'empty',
+      error: err?.message || 'Gagal memuat galeri Lookbook dari Supabase.',
+    };
+  }
+}
+
+/**
+ * Storage subfolder within "POSSENSIOR MEDIA" designated for payment assets (QRIS, etc.).
+ * Strictly matched to user specification: "payment" folder.
+ */
+export const PAYMENT_STORAGE_FOLDER = 'payment';
+
+/**
+ * Verified filename uploaded in Supabase Storage "POSSENSIOR MEDIA/payment/".
+ */
+export const DEFAULT_PAYMENT_QRIS_FILE = 'QRIS MANUAL.jpeg';
+
+/**
+ * Returns the direct Supabase Storage public URL for the authentic POSSENSIOR QRIS image.
+ * Bucket: "POSSENSIOR MEDIA"
+ * Path: "payment/QRIS MANUAL.jpeg"
+ */
+export function getPaymentQrisPublicUrl(filename: string = DEFAULT_PAYMENT_QRIS_FILE): string {
+  if (!isSupabaseConfigured) return '';
+  const cleanFilename = filename.replace(/^\/+/, '');
+  const cleanPath = `${PAYMENT_STORAGE_FOLDER}/${cleanFilename}`;
+  const { data } = supabase.storage.from(STORAGE_BUCKET_NAME).getPublicUrl(cleanPath);
+  return data?.publicUrl || '';
+}
+
+/**
+ * Fetches and resolves the authentic QRIS image from Supabase Storage:
+ * 1. Checks the "payment" folder in "POSSENSIOR MEDIA" to inspect actual files.
+ * 2. Matches the authentic uploaded QRIS file (e.g. "QRIS MANUAL.jpeg").
+ * 3. Resolves the public URL (verified working with HTTP 200) or creates a signed URL if access is restricted.
+ */
+export async function fetchPaymentQrisUrl(): Promise<{
+  url: string;
+  filename: string;
+  source: 'supabase_public' | 'supabase_signed' | 'fallback';
+  error: string | null;
+}> {
+  if (!isSupabaseConfigured) {
+    return {
+      url: '',
+      filename: '',
+      source: 'fallback',
+      error: 'Supabase belum terkonfigurasi.',
+    };
+  }
+
+  try {
+    // 1. Inspect actual files in the 'payment' folder without guessing
+    const { data: files, error: listError } = await supabase.storage
+      .from(STORAGE_BUCKET_NAME)
+      .list(PAYMENT_STORAGE_FOLDER, {
+        limit: 20,
+        sortBy: { column: 'updated_at', order: 'desc' },
+      });
+
+    let targetFilename = DEFAULT_PAYMENT_QRIS_FILE;
+
+    if (!listError && files && files.length > 0) {
+      const validImages = files.filter(
+        (f) =>
+          f.name &&
+          !f.name.startsWith('.') &&
+          /\.(jpg|jpeg|png|webp|avif)$/i.test(f.name)
+      );
+
+      // Match the QRIS file or pick the latest uploaded file in payment/
+      const qrisMatch = validImages.find((f) => /qris/i.test(f.name));
+      if (qrisMatch) {
+        targetFilename = qrisMatch.name;
+      } else if (validImages[0]) {
+        targetFilename = validImages[0].name;
+      }
+    }
+
+    const fullPath = `${PAYMENT_STORAGE_FOLDER}/${targetFilename}`;
+
+    // 2. Obtain Public URL (verified public access in POSSENSIOR MEDIA)
+    const { data: pubData } = supabase.storage
+      .from(STORAGE_BUCKET_NAME)
+      .getPublicUrl(fullPath);
+
+    const publicUrl = pubData?.publicUrl || '';
+
+    // If bucket was ever switched to private, create signed URL fallback
+    if (!publicUrl) {
+      const { data: signedData, error: signError } = await supabase.storage
+        .from(STORAGE_BUCKET_NAME)
+        .createSignedUrl(fullPath, 86400);
+
+      if (!signError && signedData?.signedUrl) {
+        return {
+          url: signedData.signedUrl,
+          filename: targetFilename,
+          source: 'supabase_signed',
+          error: null,
+        };
+      }
+    }
+
+    return {
+      url: publicUrl,
+      filename: targetFilename,
+      source: 'supabase_public',
+      error: null,
+    };
+  } catch (err: any) {
+    const fallbackUrl = getPaymentQrisPublicUrl(DEFAULT_PAYMENT_QRIS_FILE);
+    return {
+      url: fallbackUrl,
+      filename: DEFAULT_PAYMENT_QRIS_FILE,
+      source: 'fallback',
+      error: err?.message || null,
+    };
+  }
+}
+

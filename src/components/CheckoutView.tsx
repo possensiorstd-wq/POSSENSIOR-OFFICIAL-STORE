@@ -17,7 +17,12 @@ import {
   MessageCircle
 } from 'lucide-react';
 import { PossensiorIcon } from './Logos';
-import { saveOrderToDatabase } from '../lib/supabase';
+import { 
+  saveOrderToDatabase, 
+  fetchPaymentQrisUrl, 
+  getPaymentQrisPublicUrl, 
+  DEFAULT_PAYMENT_QRIS_FILE 
+} from '../lib/supabase';
 
 interface CheckoutViewProps {
   items: CartItem[];
@@ -54,6 +59,38 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
   const [formError, setFormError] = useState<string | null>(null);
   const [savedConfirmedOrder, setSavedConfirmedOrder] = useState<Order | null>(null);
 
+  // Authentic Supabase Storage QRIS state (POSSENSIOR MEDIA/payment/QRIS MANUAL.jpeg)
+  const [qrisImageUrl, setQrisImageUrl] = useState<string>(
+    QRIS_MANUAL_CONFIG.image || getPaymentQrisPublicUrl(DEFAULT_PAYMENT_QRIS_FILE)
+  );
+  const [isQrisLoading, setIsQrisLoading] = useState(false);
+  const [qrisLoadError, setQrisLoadError] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadQrisFromSupabase() {
+      setIsQrisLoading(true);
+      setQrisLoadError(false);
+      try {
+        const res = await fetchPaymentQrisUrl();
+        if (isMounted && res.url) {
+          setQrisImageUrl(res.url);
+        }
+      } catch (err) {
+        console.warn('Gagal mengambil URL QRIS Supabase:', err);
+      } finally {
+        if (isMounted) {
+          setIsQrisLoading(false);
+        }
+      }
+    }
+
+    loadQrisFromSupabase();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   // Calculate pricing: 5% other fees as per Possensior original system
   const subtotal = items.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
   const discountAmount = discount > 0 ? Math.round(subtotal * (discount / 100)) : 0;
@@ -81,111 +118,32 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
     setTimeout(() => setCopiedBank(false), 2500);
   };
 
-  const handleDownloadQRIS = () => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 600;
-    canvas.height = 780;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // Background
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(0, 0, 600, 780);
-
-    // Header bar
-    ctx.fillStyle = '#365E52';
-    ctx.fillRect(0, 0, 600, 95);
-
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 24px system-ui, -apple-system, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('POSSENSIOR OFFICIAL STORE', 300, 42);
-    ctx.font = '13px system-ui, -apple-system, sans-serif';
-    ctx.fillText('QRIS PEMBAYARAN MANUAL', 300, 70);
-
-    // QRIS & GPN Subheaders
-    ctx.fillStyle = '#18181B';
-    ctx.font = 'bold 22px system-ui, -apple-system, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText('QRIS', 50, 140);
-    ctx.textAlign = 'right';
-    ctx.fillText('GPN', 550, 140);
-
-    // QR Border Card
-    ctx.strokeStyle = '#E2E8F0';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(50, 160, 500, 500);
-
-    const finishDownload = () => {
-      ctx.fillStyle = '#64748B';
-      ctx.font = '13px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(`NMID: ${QRIS_MANUAL_CONFIG.nmid} · ${QRIS_MANUAL_CONFIG.storeName}`, 300, 695);
-
-      ctx.fillStyle = '#365E52';
-      ctx.font = 'bold 22px monospace';
-      ctx.fillText(`TOTAL: ${formatRupiah(grandTotal)}`, 300, 735);
-
+  const handleDownloadQRIS = async () => {
+    try {
+      const targetSrc = qrisImageUrl || QRIS_MANUAL_CONFIG.image || getPaymentQrisPublicUrl(DEFAULT_PAYMENT_QRIS_FILE);
+      const response = await fetch(targetSrc);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.download = `QRIS-Possensior-Manual-${Date.now()}.png`;
-      link.href = canvas.toDataURL('image/png');
+      link.href = url;
+      link.download = 'QRIS-POSSENSIOR.jpeg';
+      document.body.appendChild(link);
       link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
       setDownloadedQRIS(true);
       setTimeout(() => setDownloadedQRIS(false), 3000);
-    };
-
-    const drawFallbackPattern = () => {
-      ctx.fillStyle = '#18181B';
-      ctx.fillRect(90, 200, 100, 100);
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(110, 220, 60, 60);
-      ctx.fillStyle = '#18181B';
-      ctx.fillRect(125, 235, 30, 30);
-
-      ctx.fillRect(410, 200, 100, 100);
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(430, 220, 60, 60);
-      ctx.fillStyle = '#18181B';
-      ctx.fillRect(445, 235, 30, 30);
-
-      ctx.fillRect(90, 520, 100, 100);
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(110, 540, 60, 60);
-      ctx.fillStyle = '#18181B';
-      ctx.fillRect(125, 555, 30, 30);
-
-      const matrixDots = [
-        [220, 210, 30, 30], [270, 205, 40, 25], [330, 210, 25, 40],
-        [215, 270, 45, 25], [280, 260, 30, 30], [335, 270, 40, 25],
-        [110, 335, 30, 30], [165, 325, 40, 25], [225, 325, 30, 30], [385, 325, 30, 40], [440, 335, 30, 30],
-        [120, 395, 35, 25], [175, 400, 25, 25], [385, 395, 45, 30], [445, 400, 35, 25],
-        [225, 455, 30, 25], [275, 445, 40, 30], [335, 455, 30, 25], [385, 465, 25, 25],
-        [225, 525, 35, 30], [275, 535, 25, 25], [325, 515, 30, 35], [375, 535, 40, 25], [435, 525, 30, 30],
-        [225, 585, 25, 25], [265, 595, 40, 20], [325, 585, 30, 30], [385, 595, 35, 25], [445, 585, 40, 30]
-      ];
-      matrixDots.forEach(([x, y, w, h]) => {
-        ctx.fillRect(x, y, w, h);
-      });
-
-      ctx.fillStyle = '#365E52';
-      ctx.fillRect(260, 370, 80, 80);
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'italic bold 52px system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('P', 300, 430);
-    };
-
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.src = QRIS_MANUAL_CONFIG.image;
-    img.onload = () => {
-      ctx.drawImage(img, 70, 180, 460, 460);
-      finishDownload();
-    };
-    img.onerror = () => {
-      drawFallbackPattern();
-      finishDownload();
-    };
+    } catch {
+      const link = document.createElement('a');
+      link.href = qrisImageUrl || QRIS_MANUAL_CONFIG.image || getPaymentQrisPublicUrl(DEFAULT_PAYMENT_QRIS_FILE);
+      link.download = 'QRIS-POSSENSIOR.jpeg';
+      link.target = '_blank';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setDownloadedQRIS(true);
+      setTimeout(() => setDownloadedQRIS(false), 3000);
+    }
   };
 
   const processOrderSubmission = async (method: 'qris' | 'bank_transfer') => {
@@ -637,52 +595,47 @@ Saya melampirkan foto / bukti transfer bank pada pesan WhatsApp ini. Mohon admin
                   </div>
 
                   {/* Manual QRIS Image Card */}
-                  <div className="mx-auto max-w-[280px] bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center">
-                    <div className="flex items-center justify-between w-full text-[10px] font-bold text-slate-700 tracking-wider mb-2">
+                  <div className="mx-auto w-full max-w-[340px] sm:max-w-[380px] bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center">
+                    <div className="flex items-center justify-between w-full text-[11px] font-bold text-slate-700 tracking-wider mb-2.5 px-1">
                       <span>QRIS</span>
                       <span className="text-[#365E52] font-extrabold tracking-wide">POSSENSIOR</span>
                       <span>GPN</span>
                     </div>
 
                     {/* QR Code Image Container */}
-                    <div className="w-56 h-56 relative rounded-xl overflow-hidden border border-slate-200 bg-white flex items-center justify-center p-2">
-                      <img
-                        src={QRIS_MANUAL_CONFIG.image}
-                        alt="QRIS Manual Possensior"
-                        onError={(e) => {
-                          // In case image not yet replaced, fallback to SVG visual
-                          const target = e.target as HTMLElement;
-                          target.style.display = 'none';
-                          const fallback = document.getElementById('qris-svg-fallback');
-                          if (fallback) fallback.style.display = 'flex';
-                        }}
-                        className="w-full h-full object-contain"
-                      />
-                      <div id="qris-svg-fallback" style={{ display: 'none' }} className="w-full h-full flex-col items-center justify-center">
-                        <svg viewBox="0 0 100 100" className="w-36 h-36 text-slate-900 fill-current">
-                          <rect x="0" y="0" width="30" height="30" rx="3" fill="#18181B" />
-                          <rect x="5" y="5" width="20" height="20" rx="2" fill="white" />
-                          <rect x="10" y="10" width="10" height="10" fill="#18181B" />
-                          <rect x="70" y="0" width="30" height="30" rx="3" fill="#18181B" />
-                          <rect x="75" y="5" width="20" height="20" rx="2" fill="white" />
-                          <rect x="80" y="10" width="10" height="10" fill="#18181B" />
-                          <rect x="0" y="70" width="30" height="30" rx="3" fill="#18181B" />
-                          <rect x="5" y="75" width="20" height="20" rx="2" fill="white" />
-                          <rect x="10" y="80" width="10" height="10" fill="#18181B" />
-                          <rect x="36" y="8" width="8" height="8" fill="#18181B" />
-                          <rect x="52" y="12" width="6" height="12" fill="#18181B" />
-                          <rect x="12" y="38" width="10" height="8" fill="#18181B" />
-                          <rect x="40" y="40" width="20" height="20" rx="3" fill="#365E52" />
-                          <rect x="68" y="44" width="8" height="14" fill="#18181B" />
-                          <rect x="82" y="36" width="10" height="10" fill="#18181B" />
-                          <rect x="42" y="68" width="12" height="8" fill="#18181B" />
-                          <rect x="62" y="72" width="14" height="14" fill="#18181B" />
-                          <rect x="80" y="80" width="12" height="12" fill="#18181B" />
-                        </svg>
-                      </div>
+                    <div className="w-full relative rounded-xl overflow-hidden border border-slate-200 bg-white flex items-center justify-center p-3 sm:p-4 min-h-[280px]">
+                      {isQrisLoading && (
+                        <div className="absolute inset-0 bg-white/80 backdrop-blur-2xs flex flex-col items-center justify-center z-10">
+                          <div className="w-8 h-8 border-3 border-[#365E52] border-t-transparent rounded-full animate-spin mb-2" />
+                          <span className="text-[11px] font-semibold text-slate-600">Memuat QRIS Supabase...</span>
+                        </div>
+                      )}
+
+                      {qrisLoadError ? (
+                        <div className="text-center p-4">
+                          <p className="text-xs text-rose-600 font-semibold mb-2">Gagal memuat gambar QRIS dari Supabase Storage.</p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setQrisLoadError(false);
+                              setQrisImageUrl(getPaymentQrisPublicUrl(DEFAULT_PAYMENT_QRIS_FILE) + '?t=' + Date.now());
+                            }}
+                            className="text-xs text-[#365E52] underline font-bold cursor-pointer"
+                          >
+                            Muat Ulang QRIS
+                          </button>
+                        </div>
+                      ) : (
+                        <img
+                          src={qrisImageUrl}
+                          alt="QRIS Manual POSSENSIOR"
+                          onError={() => setQrisLoadError(true)}
+                          className="w-full max-w-[280px] sm:max-w-[320px] aspect-square object-contain rounded-lg block shadow-2xs"
+                        />
+                      )}
                     </div>
 
-                    <span className="text-[10px] text-slate-500 font-mono mt-2 font-medium">
+                    <span className="text-[10px] text-slate-500 font-mono mt-2.5 font-medium">
                       NMID: {QRIS_MANUAL_CONFIG.nmid} · {QRIS_MANUAL_CONFIG.storeName}
                     </span>
                   </div>

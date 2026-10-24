@@ -868,7 +868,13 @@ export const OwnerControl: React.FC<OwnerControlProps> = ({
 
                     <button
                       type="button"
-                      onClick={() => setShowBatchPrint(true)}
+                      onClick={() => {
+                        if (!orders || orders.length === 0) {
+                          alert('Belum ada pesanan yang tersedia untuk dicetak.');
+                          return;
+                        }
+                        setShowBatchPrint(true);
+                      }}
                       className="px-3.5 py-2 bg-slate-900 hover:bg-black text-white text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
                     >
                       <Printer className="w-3.5 h-3.5 text-emerald-400" />

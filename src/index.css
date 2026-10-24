@@ -54,55 +54,91 @@
 
 /* Print optimization for thermal and standard paper receipts */
 @media print {
+  @page {
+    size: auto;
+    margin: 8mm;
+  }
+
   html, body {
-    background: white !important;
-    color: black !important;
+    background: #ffffff !important;
+    color: #000000 !important;
     margin: 0 !important;
     padding: 0 !important;
     height: auto !important;
+    min-height: 100% !important;
     overflow: visible !important;
   }
 
-  /* Hide all regular UI and background modals */
-  body * {
-    visibility: hidden;
+  /* Hide regular UI elements when printing */
+  header,
+  nav,
+  footer,
+  aside,
+  .no-print,
+  .print\:hidden {
+    display: none !important;
+    visibility: hidden !important;
   }
 
-  /* Only make the active print zone and its children visible */
-  .possensior-print-zone,
-  .possensior-print-zone * {
-    visibility: visible !important;
+  /* Make modal backdrops transparent and static during print */
+  .print-modal-backdrop {
+    position: static !important;
+    display: block !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    width: 100% !important;
+    height: auto !important;
+    inset: auto !important;
+    z-index: auto !important;
+  }
+
+  .print-modal-window {
+    position: static !important;
+    display: block !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+    border: none !important;
+    max-height: none !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
 
   .possensior-print-zone {
-    position: absolute !important;
-    left: 0 !important;
-    top: 0 !important;
+    display: block !important;
+    visibility: visible !important;
+    position: static !important;
     width: 100% !important;
     max-width: 100% !important;
     margin: 0 !important;
-    padding: 8px !important;
-    background: white !important;
-    box-shadow: none !important;
-    border: none !important;
+    padding: 0 !important;
+    background: #ffffff !important;
     overflow: visible !important;
   }
 
-  /* Ensure colors, barcodes, and borders render cleanly */
-  * {
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
+  .printable-receipt-card {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    border: 2px solid #000000 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin-bottom: 24px !important;
   }
 
-  /* Explicitly remove buttons, backdrops, and navigation */
-  .no-print,
-  .print\:hidden,
-  .print-modal-backdrop,
-  header,
-  nav,
-  footer {
-    display: none !important;
-    visibility: hidden !important;
+  .print-page-break {
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  /* Ensure colors, barcodes, and borders render cleanly */
+  *, *::before, *::after {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 }
 

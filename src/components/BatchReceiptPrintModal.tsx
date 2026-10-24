@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Order } from '../types/store';
 import { Printer, X } from 'lucide-react';
 import { ShippingReceiptCard } from './ShippingReceiptCard';
+import { printReceiptElement } from '../utils/printReceipts';
 
 interface BatchReceiptPrintModalProps {
   isOpen: boolean;
@@ -14,10 +15,21 @@ export const BatchReceiptPrintModal: React.FC<BatchReceiptPrintModalProps> = ({
   onClose,
   orders,
 }) => {
-  if (!isOpen) return null;
+  const printAreaRef = useRef<HTMLDivElement>(null);
+
+  if (!isOpen || !orders || orders.length === 0) return null;
 
   const handlePrint = () => {
-    window.print();
+    try {
+      if (printAreaRef.current) {
+        printReceiptElement(printAreaRef.current, `Resi-Batch-${orders.length}-Pesanan`);
+      } else {
+        window.print();
+      }
+    } catch (err: any) {
+      console.error('Batch print failed', err);
+      window.print();
+    }
   };
 
   return (
@@ -55,9 +67,17 @@ export const BatchReceiptPrintModal: React.FC<BatchReceiptPrintModalProps> = ({
         </div>
 
         {/* Dedicated Printable Area */}
-        <div className="possensior-print-zone print-modal-scroll flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50 print:bg-white print:p-0">
-          {orders.map((order) => (
-            <ShippingReceiptCard key={order.id} order={order} />
+        <div
+          ref={printAreaRef}
+          className="possensior-print-zone print-modal-scroll flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50 print:bg-white print:p-0"
+        >
+          {orders.map((order, idx) => (
+            <div
+              key={order.id}
+              className={idx < orders.length - 1 ? 'print-page-break' : ''}
+            >
+              <ShippingReceiptCard order={order} />
+            </div>
           ))}
         </div>
       </div>

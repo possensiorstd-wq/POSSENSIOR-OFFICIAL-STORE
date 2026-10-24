@@ -1,15 +1,29 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import fs from 'fs';
 import path from 'path';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
+  const possibleQrisPaths = [
+    path.resolve(__dirname, 'src/image/QRIS MANUAL.jpeg'),
+    path.resolve(__dirname, 'src/images/QRIS MANUAL.jpeg'),
+    path.resolve(__dirname, 'src/assets/images/QRIS MANUAL.jpeg'),
+    path.resolve(__dirname, 'src/assets/QRIS MANUAL.jpeg'),
+    path.resolve(__dirname, 'src-image-QRIS MANUAL.jpeg'),
+  ];
+  const actualQrisPath = possibleQrisPaths.find(p => fs.existsSync(p)) || possibleQrisPaths[0];
+
   return {
     plugins: [react(), tailwindcss()],
     resolve: {
-      alias: {
-        '@': path.resolve(__dirname, '.'),
-      },
+      alias: [
+        { find: '../image/QRIS MANUAL.jpeg', replacement: actualQrisPath },
+        { find: '../assets/images/QRIS MANUAL.jpeg', replacement: actualQrisPath },
+        { find: '@/image/QRIS MANUAL.jpeg', replacement: actualQrisPath },
+        { find: '@/assets/images/QRIS MANUAL.jpeg', replacement: actualQrisPath },
+        { find: '@', replacement: path.resolve(__dirname, '.') },
+      ],
     },
     define: {
       'import.meta.env.VITE_SUPABASE_ANON': JSON.stringify(
